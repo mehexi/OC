@@ -6,16 +6,16 @@ import (
 )
 
 func ChatView(m Model) tea.View {
-	chatBubble := RenderChatBubble(m.inputText.Value(), m)
 	inputBox := RenderInputBox(m)
+	inputHeight := lipgloss.Height(inputBox)
 
-	content := lipgloss.NewStyle().
-		Width(m.width).
-		Height(m.height - 1).
-		Render(chatBubble + "\n\n" + chatBubble + "\n" + inputBox)
+	vp := m.viewPort
+	vp.SetWidth(m.width)
+	vp.SetHeight(m.height - inputHeight)
+
+	content := lipgloss.JoinVertical(lipgloss.Top, vp.View(), inputBox)
 
 	v := tea.NewView(content)
 	v.AltScreen = true
-
 	return v
 }

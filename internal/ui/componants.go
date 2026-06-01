@@ -15,22 +15,19 @@ func RenderChatBubble(text string, m Model) string {
 
 func RenderInputBox(m Model) string {
 	width := m.width
-
-	if m.isSplashScreen == true {
-		width = m.width / 2
+	if m.isSplashScreen {
+		width = m.width * 8 / 10
 	}
-
-	inputContent := lipgloss.NewStyle().
-		Foreground(cyanColor).
-		Render(m.inputText.View())
 
 	inputBox := lipgloss.NewStyle().
 		Width(width).
-		Padding(0, 1).
-		Background(bgColor).
-		Border(lipgloss.NormalBorder(), true).
+		Padding(1, 0).
+		Background(inputBgColor).
+		BorderStyle(lipgloss.ThickBorder()).
+		BorderLeft(true).
 		BorderForeground(cyanColor).
-		Render(inputContent)
+		Foreground(cyanColor).
+		Render(m.inputText.View())
 
 	return inputBox
 }
