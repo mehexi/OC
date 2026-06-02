@@ -7,14 +7,18 @@ import (
 
 func ChatView(m Model) tea.View {
 	inputBox := RenderInputBox(m)
-	inputHeight := lipgloss.Height(inputBox)
+	welcomeMsg := RenderSplash(m)
 
-	vp := m.viewPort
-	vp.SetWidth(m.width)
-	vp.SetHeight(m.height - inputHeight)
+	content := lipgloss.JoinVertical(
+		lipgloss.Top,
+		welcomeMsg,
+		m.viewPort.View(),
+		inputBox,
+	)
 
-	content := lipgloss.JoinVertical(lipgloss.Top, vp.View(), inputBox)
-	return tea.NewView(content)
+	v := tea.NewView(content)
+	v.AltScreen = true
+	return v
 }
 
 func RenderChatBubble(msg ChatMessage, m Model) string {
@@ -38,18 +42,18 @@ func RenderChatBubble(msg ChatMessage, m Model) string {
 }
 
 func RenderInputBox(m Model) string {
-	prompt := lipgloss.NewStyle().Foreground(cyanColor).Render("╰─ $")
+	input := m.inputText.View()
 
-	var inputLine string
 	if m.loading {
-		loading := lipgloss.NewStyle().Foreground(mutedColor).Render("…")
-		inputLine = prompt + " " + loading + " " + m.inputText.View()
-	} else {
-		inputLine = prompt + " " + m.inputText.View()
+		input = "… " + input
 	}
 
 	return lipgloss.NewStyle().
 		Width(m.width).
-		Padding(0, 2).
-		Render(inputLine)
+		Border(lipgloss.NormalBorder()).
+		BorderLeft(false).BorderRight(false).
+		Padding(0, 1).
+		Render(
+			input,
+		)
 }

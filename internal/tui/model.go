@@ -14,13 +14,12 @@ type ChatMessage struct {
 }
 
 type Model struct {
-	viewPort  viewport.Model
-	inputText textinput.Model
-	messages  []ChatMessage
-	sessionId string
-	loading   bool
-	width     int
-	height    int
+	viewPort   viewport.Model
+	inputText  textinput.Model
+	messages   []ChatMessage
+	sessionId  string
+	loading    bool
+	width      int
 	serverAddr string
 	serverErr  error
 
@@ -49,4 +48,22 @@ type ChatResponseMsg struct {
 
 type LoadSessionMsg struct {
 	Session *history.Session
+}
+
+func IntialModel() Model {
+	ti := textinput.New()
+	ti.Placeholder = "Ask anything ..."
+	ti.SetWidth(50)
+	ti.Focus()
+
+	vp := viewport.New()
+
+	return Model{
+		viewPort:  vp,
+		inputText: ti,
+		messages:  []ChatMessage{},
+		sessionId: "",
+		loading:   false,
+		width:     0,
+	}
 }
