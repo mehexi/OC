@@ -1,52 +1,85 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"charm.land/lipgloss/v2"
 )
 
-func RenderSplash(m Model) string {
+func modeTag(m Model) string {
+	label := "  NORMAL  "
+	fg := lipgloss.Color("#888888")
 
-	logoIcon := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Render(`
-⠀⠀⠀⠀⠀⠀⣀⣤⡤⠀⠀⠀
-⠀⠀⠀⠀⢀⣾⣿⠋⠀
-⠀⠀⠀⣠⣾⣿⡟⠀⠀
-⠀⠀⢸⠛⠉⢹⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⡠⠄⠠⣀⠀⠀
-⠀⠀⡘⠀⠀⠀⡀⠀⠀⠀⠀⠀⠀⠀⠀⣠⠖⠉⠀⠀⠀⣾⣿⣦
-⠀⠀⡇⠀⠀⠀⢡⠄⠀⠀⣀⣀⣀⣠⠊⠀⠀⠀⠀⡠⠞⠛⠛⠛
-⠀⠀⢃⠀⠀⠀⠀⠗⠚⠉⠉⠀⠈⠁⠀⠀⠀⢀⡔⠁⠀
-⠀⠀⠸⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣴⣶⣄⠲⡎⠀⠀
-⠀⠀⠀⠃⠀⠀⢠⣤⡀⠀⠀⠀⠀⣿⣿⣿⠀⠘⡄
-⠀⠀⠀⡆⠀⠀⣿⣿⡇⠀⠀⠀⠀⠈⠛⠉⣴⣆⢹⡄⠀⠀⠀⠀⠀
-⠀⠀⠀⣇⢰⡧⣉⡉⠀⠀⢀⡀⠀⣀⣀⣠⣿⡷⢠⡇⠀⠀⠀⠀⠀
-⠀⠀⠀⢻⠘⠃⠈⠻⢦⠞⠋⠙⠺⠋⠉⠉⠉⢡⠟⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠳⢄⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢠⠋
+	switch m.mode {
+	case modeInsert:
+		label = "  INSERT  "
+		fg = cyanColor
+	case modeVisual:
+		label = "  VISUAL  "
+		fg = orangeColor
+	}
+
+	return lipgloss.NewStyle().
+		Foreground(fg).
+		Width(m.width).
+		Border(lipgloss.NormalBorder()).
+		BorderBottom(true).BorderLeft(false).BorderRight(false).BorderTop(false).
+		Render(label)
+}
+
+func RenderSplash(m Model) string {
+	logoIcon := lipgloss.NewStyle().Render(`
+⣡⣴⣶⣶⡀⠄⠄⠙⢿⣿⣿⣿⣿⣿⣴⣿⣿⣿⢃⣤⣄⣀⣥⣿
+⢸⣇⠻⣿⣿⣿⣧⣀⢀⣠⡌⢻⣿⣿⣿⣿⣿⣿⣿⣿⣿⠿⠿⠿⣿⣿
+⢸⣿⣷⣤⣤⣤⣬⣙⣛⢿⣿⣿⣿⣿⣿⣿⡿⣿⣿⡍⠄⠄⢀⣤⣄⠉
+⣖⣿⣿⣿⣿⣿⣿⣿⣿⣿⢿⣿⣿⣿⣿⣿⢇⣿⣿⡷⠶⠶⢿⣿⣿⠇⢀
+⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣽⣿⣿⣿⡇⣿⣿⣿⣿⣿⣿⣷⣶⣥⣴
+⢿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿
+⣦⣌⣛⣻⣿⣿⣧⠙⠛⠛⡭⠅⠒⠦⠭⣭⡻⣿⣿⣿⣿⣿⣿⣿⣿⡿⠃⠄
+⣿⣿⣿⣿⣿⣿⣿⡆⠄⠄⠄⠄⠄⠄⠄⠄⠹⠈⢋⣽⣿⣿⣿⣿⣵⣾
+⣿⣿⣿⣿⣿⣿⣿⣿⠄⣴⣿⣶⣄⠄⣴⣶⠄⢀⣾⣿⣿⣿⣿⣿⣿⠃⠄⠄
+⠈⠻⣿⣿⣿⣿⣿⣿⡄⢻⣿⣿⣿⠄⣿⣿⡀⣾⣿⣿⣿⣿⣛⠛⠁
+⠄⠄⠈⠛⢿⣿⣿⣿⠁⠞⢿⣿⣿⡄⢿⣿⡇⣸⣿⣿⠿⠛⠁⠄
+⠄⠄⠄⠄⠄⠉⠻⣿⣿⣾⣦⡙⠻⣷⣾⣿⠃⠿⠋⠁⠄
 `)
 
-	tips := []string{
-		"  • Use /sessions to browse history",
-		"  • Use /load <n> to resume a past session",
+	borderedLogo := lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder()).
+		BorderRight(true).BorderLeft(false).BorderTop(false).BorderBottom(false).
+		Render(logoIcon)
+
+	var infoLines []string
+	if m.healthStatus != nil && m.healthStatus.Healthy {
+		infoLines = append(infoLines, lipgloss.NewStyle().Foreground(greenColor).Render("● Connected  v"+m.healthStatus.Version))
+		if m.modelName != "" {
+			infoLines = append(infoLines, lipgloss.NewStyle().Foreground(whiteColor).Render(m.modelName))
+		}
+		if m.currentPath != "" {
+			infoLines = append(infoLines, lipgloss.NewStyle().Foreground(mutedColor).Render(m.currentPath))
+		}
+		if m.contextLimit > 0 {
+			remaining := m.contextLimit - m.tokensUsed
+			infoLines = append(infoLines, lipgloss.NewStyle().Foreground(mutedColor).Render(fmt.Sprintf("%d / %d tokens  %d remaining", m.tokensUsed, m.contextLimit, remaining)))
+		}
+	} else {
+		infoLines = append(infoLines, lipgloss.NewStyle().Foreground(orangeColor).Render("● Connecting..."))
 	}
 
-	var tipLines []string
-	for _, t := range tips {
-		tipLines = append(tipLines, lipgloss.NewStyle().Foreground(mutedColor).Render(t))
-	}
-
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		logoIcon,
-		strings.Join(tipLines, "\n"),
+	body := lipgloss.JoinHorizontal(lipgloss.Top,
+		borderedLogo,
+		lipgloss.NewStyle().PaddingLeft(2).Render(strings.Join(infoLines, "\n")),
 	)
 
-	splash := lipgloss.NewStyle().
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		modeTag(m),
+		body,
+	)
+
+	return lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder()).
 		BorderBottom(true).BorderLeft(false).BorderRight(false).BorderTop(false).
 		Width(m.width).
 		Align(lipgloss.Left).
 		Render(content)
-
-	return lipgloss.JoinVertical(lipgloss.Left,
-		splash,
-	)
 }

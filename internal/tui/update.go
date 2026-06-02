@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"oc/internal/api"
 	"oc/internal/history"
-	"oc/internal/server"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // onServerStarted initialises the API client and triggers a health check.
@@ -19,8 +19,18 @@ func (m Model) onServerStarted(msg ServerStartedMsg) (Model, tea.Cmd) {
 
 func (m Model) refreshMessages() Model {
 	var chatBubbles []string
-	for _, msg := range m.messages {
-		chatBubbles = append(chatBubbles, RenderChatBubble(msg, m))
+	for i, msg := range m.messages {
+		bubble := RenderChatBubble(msg, m)
+		if m.mode == modeVisual {
+			lo, hi := m.visualAnchor, m.visualCursor
+			if lo > hi {
+				lo, hi = hi, lo
+			}
+			if i >= lo && i <= hi {
+				bubble = lipgloss.NewStyle().Background(selectBgColor).Render(bubble)
+			}
+		}
+		chatBubbles = append(chatBubbles, bubble)
 	}
 	m.viewPort.SetContent(strings.Join(chatBubbles, "\n\n"))
 	return m
@@ -42,8 +52,37 @@ func (m Model) onHealthCheck(msg HealthCheckMsg) (Model, tea.Cmd) {
 		m.healthStatus = msg.Status
 		welcome := fmt.Sprintf("Server v%s connected. Type /sessions for history.", msg.Status.Version)
 		m.messages = append(m.messages, ChatMessage{Role: "assistant", Content: welcome})
+		return m.refreshMessages(), tea.Batch(m.fetchProviders(), m.fetchPath())
 	}
 	return m.refreshMessages(), nil
+}
+
+// onProvidersInfo stores the default model name.
+func (m Model) onProvidersInfo(msg ProvidersInfoMsg) (Model, tea.Cmd) {
+	if msg.Err == nil {
+		m.modelName = msg.ModelName
+	}
+	return m, nil
+}
+
+// onPath stores the current working directory path.
+func (m Model) onPath(msg PathMsg) (Model, tea.Cmd) {
+	if msg.Err == nil {
+		m.currentPath = msg.Path
+	}
+	return m, nil
+}
+
+// onSessionUsage stores token usage info from the current session.
+func (m Model) onSessionUsage(msg SessionUsageMsg) (Model, tea.Cmd) {
+	if msg.Err == nil {
+		m.tokensUsed = msg.TokensUsed
+		m.contextLimit = msg.ContextLimit
+		if msg.ModelName != "" {
+			m.modelName = msg.ModelName
+		}
+	}
+	return m, nil
 }
 
 // onChatResponse handles an incoming chat response or error and persists history.
@@ -59,6 +98,9 @@ func (m Model) onChatResponse(msg ChatResponseMsg) (Model, tea.Cmd) {
 				history.AppendMessage(msg.SessionID, "user", m.messages[len(m.messages)-1].Content)
 			}
 		}
+		if msg.ModelName != "" {
+			m.modelName = msg.ModelName
+		}
 		m.messages = append(m.messages, ChatMessage{Role: "assistant", Content: msg.Response})
 		if m.sessionId != "" {
 			history.AppendMessage(m.sessionId, "assistant", msg.Response)
@@ -66,7 +108,7 @@ func (m Model) onChatResponse(msg ChatResponseMsg) (Model, tea.Cmd) {
 	}
 	m = m.refreshMessages()
 	m.viewPort.GotoBottom()
-	return m, nil
+	return m, m.fetchSessionUsage()
 }
 
 // onLoadSession populates messages and session ID from a loaded history session.
@@ -78,10 +120,10 @@ func (m Model) onLoadSession(msg LoadSessionMsg) (Model, tea.Cmd) {
 	}
 	m = m.refreshMessages()
 	m.viewPort.GotoBottom()
-	return m, nil
+	return m, m.fetchSessionUsage()
 }
 
-const splashHeight = 19
+const splashHeight = 17
 const inputBoxHeight = 3
 
 // onWindowSize updates layout dimensions when the terminal is resized.
@@ -92,44 +134,18 @@ func (m Model) onWindowSize(msg tea.WindowSizeMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// onKeyPress handles ctrl+c to quit/clear and enter to submit a message or command.
+// onKeyPress dispatches key events to the active mode handler.
 func (m Model) onKeyPress(msg tea.KeyPressMsg) (Model, tea.Cmd) {
-	switch msg.String() {
-	case "ctrl+c":
-		if m.inputText.Value() == "" {
-			server.KillServer()
-			return m, tea.Quit
-		}
-		m.inputText.SetValue("")
-		return m, nil
-
-	case "enter":
-		input := m.inputText.Value()
-		if input != "" && !m.loading {
-			if strings.HasPrefix(input, "/") {
-				m.inputText.SetValue("")
-				parts := strings.Fields(input)
-				if len(parts) == 2 && parts[0] == "/session" && parts[1] == "new" {
-					m.sessionId = ""
-					m.messages = nil
-					m = m.refreshMessages()
-					return m, m.addAssistantMsg("Started a new session.")
-				}
-				return m, m.handleCommand(input)
-			}
-			m.messages = append(m.messages, ChatMessage{Role: "user", Content: input})
-			m = m.refreshMessages()
-			m.inputText.SetValue("")
-			m.loading = true
-			return m, m.sendChat(input)
-		}
+	switch m.mode {
+	case modeNormal:
+		return m.onNormalKey(msg)
+	case modeInsert:
+		return m.onInsertKey(msg)
+	case modeVisual:
+		return m.onVisualKey(msg)
+	default:
+		return m.onInsertKey(msg)
 	}
-
-	var cmd tea.Cmd
-	m.inputText, cmd = m.inputText.Update(msg)
-	var vpCmd tea.Cmd
-	m.viewPort, vpCmd = m.viewPort.Update(msg)
-	return m, tea.Batch(cmd, vpCmd)
 }
 
 // rebuildView refreshes viewport content and propagates component updates.
@@ -156,6 +172,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onChatResponse(msg)
 	case LoadSessionMsg:
 		return m.onLoadSession(msg)
+	case ProvidersInfoMsg:
+		return m.onProvidersInfo(msg)
+	case PathMsg:
+		return m.onPath(msg)
+	case SessionUsageMsg:
+		return m.onSessionUsage(msg)
 	case tea.WindowSizeMsg:
 		return m.onWindowSize(msg)
 	case tea.KeyPressMsg:

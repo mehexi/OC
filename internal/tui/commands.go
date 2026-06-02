@@ -18,11 +18,11 @@ func (m Model) sendChat(text string) tea.Cmd {
 			}
 			sessionID = id
 		}
-		resp, err := m.client.SendMessage(sessionID, text)
+		resp, modelName, err := m.client.SendMessage(sessionID, text)
 		if err != nil {
 			return ChatResponseMsg{Err: err, SessionID: sessionID}
 		}
-		return ChatResponseMsg{Response: resp, SessionID: sessionID}
+		return ChatResponseMsg{Response: resp, SessionID: sessionID, ModelName: modelName}
 	}
 }
 
@@ -30,6 +30,72 @@ func (m Model) checkHealth() tea.Cmd {
 	return func() tea.Msg {
 		status, err := m.client.Health()
 		return HealthCheckMsg{Status: status, Err: err}
+	}
+}
+
+func (m Model) fetchPath() tea.Cmd {
+	return func() tea.Msg {
+		p, err := m.client.GetPath()
+		if err != nil {
+			return PathMsg{Err: err}
+		}
+		return PathMsg{Path: p}
+	}
+}
+
+func (m Model) fetchProviders() tea.Cmd {
+	return func() tea.Msg {
+		resp, err := m.client.GetProviders()
+		if err != nil {
+			return ProvidersInfoMsg{Err: err}
+		}
+		modelName := ""
+		if len(resp.Default) > 0 {
+			for _, v := range resp.Default {
+				modelName = v
+				break
+			}
+		}
+		return ProvidersInfoMsg{ModelName: modelName}
+	}
+}
+
+func (m Model) fetchSessionUsage() tea.Cmd {
+	return func() tea.Msg {
+		if m.sessionId == "" {
+			return SessionUsageMsg{}
+		}
+		s, err := m.client.GetSession(m.sessionId)
+		if err != nil {
+			return SessionUsageMsg{Err: err}
+		}
+		tokens := 0
+		limit := 0
+		model := ""
+		if v, ok := s["model"]; ok {
+			model, _ = v.(string)
+		}
+		if u, ok := s["usage"]; ok {
+			if usage, ok := u.(map[string]interface{}); ok {
+				for _, key := range []string{"tokens_used", "total_tokens", "input_tokens"} {
+					if t, ok := usage[key]; ok {
+						if f, ok := t.(float64); ok {
+							tokens = int(f)
+							break
+						}
+					}
+				}
+				for _, key := range []string{"context_limit", "max_context", "context_window", "max_tokens"} {
+					if l, ok := usage[key]; ok {
+						if f, ok := l.(float64); ok {
+							limit = int(f)
+							break
+						}
+					}
+				}
+			}
+		}
+		return SessionUsageMsg{TokensUsed: tokens, ContextLimit: limit, ModelName: model}
 	}
 }
 

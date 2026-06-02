@@ -8,6 +8,14 @@ import (
 	"charm.land/bubbles/v2/viewport"
 )
 
+type VimMode int
+
+const (
+	modeNormal VimMode = iota
+	modeInsert
+	modeVisual
+)
+
 type ChatMessage struct {
 	Role    string
 	Content string
@@ -27,6 +35,16 @@ type Model struct {
 	healthChecked bool
 	healthStatus  *api.HealthResponse
 	healthErr     error
+
+	modelName     string
+	tokensUsed    int
+	contextLimit  int
+	currentPath   string
+
+	mode         VimMode
+	visualAnchor int
+	visualCursor int
+	awaitingGG   bool
 }
 
 type ServerStartedMsg struct {
@@ -43,11 +61,29 @@ type HealthCheckMsg struct {
 type ChatResponseMsg struct {
 	Response  string
 	SessionID string
+	ModelName string
 	Err       error
 }
 
 type LoadSessionMsg struct {
 	Session *history.Session
+}
+
+type ProvidersInfoMsg struct {
+	ModelName string
+	Err       error
+}
+
+type PathMsg struct {
+	Path string
+	Err  error
+}
+
+type SessionUsageMsg struct {
+	ModelName    string
+	TokensUsed   int
+	ContextLimit int
+	Err          error
 }
 
 func IntialModel() Model {
@@ -65,5 +101,6 @@ func IntialModel() Model {
 		sessionId: "",
 		loading:   false,
 		width:     0,
+		mode:      modeNormal,
 	}
 }
