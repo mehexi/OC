@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"oc/internal/ui"
+	"oc/internal/tui"
 	"os"
 
 	tea "charm.land/bubbletea/v2"
@@ -10,7 +10,7 @@ import (
 
 func main() {
 	p := tea.NewProgram(
-		ui.IntialModel(),
+		tui.IntialModel(),
 	)
 
 	if _, err := p.Run(); err != nil {
