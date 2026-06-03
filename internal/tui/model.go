@@ -146,15 +146,16 @@ func IntialModel() Model {
 
 	ti.SetStyles(s)
 
-	vp := viewport.New()
+	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(24))
 
 	return Model{
-		viewPort:  vp,
-		inputText: ti,
-		messages:  []ChatMessage{},
-		sessionId: "",
-		loading:   false,
-		width:     0,
-		mode:      modeInsert,
+		viewPort:   vp,
+		inputText:  ti,
+		messages:   []ChatMessage{},
+		sessionId:  "",
+		loading:    false,
+		width:      80,
+		termHeight: 24,
+		mode:       modeInsert,
 	}
 }

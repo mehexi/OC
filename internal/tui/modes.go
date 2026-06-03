@@ -231,11 +231,10 @@ func (m Model) showQusList() Model {
 		qusHeight = available - 3
 	}
 	m.qusHeight = qusHeight
-	m.viewPort.SetHeight(available - qusHeight)
 
 	m.mode = modeQus
 	m.inputText.Blur()
-	return m
+	return m.syncLayout()
 }
 
 func (m Model) handleQusAnswer() (Model, tea.Cmd) {
@@ -259,10 +258,9 @@ func (m Model) handleQusAnswer() (Model, tea.Cmd) {
 	m.mode = modeInsert
 	m.inputText.Focus()
 	m.inputText.Placeholder = "Ask anything ..."
-	m.viewPort.SetHeight(m.termHeight - splashHeight - inputBoxHeight)
 	m.qusHeight = 0
 	m.loading = true
-	return m, m.sendControlResponse()
+	return m.syncLayout(), m.sendControlResponse()
 }
 
 func (m Model) handleQusCancel() (Model, tea.Cmd) {
@@ -275,10 +273,10 @@ func (m Model) handleQusCancel() (Model, tea.Cmd) {
 	m.mode = modeInsert
 	m.inputText.Focus()
 	m.inputText.Placeholder = "Ask anything ..."
-	m.viewPort.SetHeight(m.termHeight - splashHeight - inputBoxHeight)
 	m.qusHeight = 0
 	m.messages = append(m.messages, ChatMessage{Role: "assistant", Content: "Question cancelled."})
-	return m.refreshMessages(), nil
+	m = m.refreshMessages()
+	return m.syncLayout(), nil
 }
 
 func (m Model) onQusKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
@@ -316,20 +314,9 @@ func (m Model) showSessionList() Model {
 	m.sessionPage = 0
 	m.sessionCursor = 0
 
-	const compactHeaderHeight = 3
-	itemsPerPage := 5
-	total := len(sessions)
-	totalPages := (total + itemsPerPage - 1) / itemsPerPage
-	sessionLines := 2 + itemsPerPage
-	if totalPages > 1 {
-		sessionLines += 2
-	}
-	available := m.termHeight - compactHeaderHeight - inputBoxHeight
-	m.viewPort.SetHeight(available - sessionLines)
-
 	m.mode = modeSession
 	m.inputText.Blur()
-	return m
+	return m.syncLayout()
 }
 
 func (m Model) onSessionKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
@@ -372,7 +359,7 @@ func (m Model) onSessionKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		m.mode = modeInsert
 		m.inputText.Focus()
 		m.inputText.Placeholder = "Ask anything ..."
-		m.viewPort.SetHeight(m.termHeight - splashHeight - inputBoxHeight)
+		m = m.syncLayout()
 		return m, func() tea.Msg {
 			s, err := history.LoadSession(selected.ID)
 			if err != nil {
@@ -390,8 +377,21 @@ func (m Model) handleSessionCancel() (Model, tea.Cmd) {
 	m.mode = modeInsert
 	m.inputText.Focus()
 	m.inputText.Placeholder = "Ask anything ..."
-	m.viewPort.SetHeight(m.termHeight - splashHeight - inputBoxHeight)
-	return m, nil
+	return m.syncLayout(), nil
+}
+
+func filteredCmdList(m Model) []cmdItem {
+	input := strings.TrimPrefix(m.inputText.Value(), "/")
+	if input == "" {
+		return cmdList
+	}
+	var result []cmdItem
+	for _, c := range cmdList {
+		if strings.Contains(strings.ToLower(c.Name), strings.ToLower(input)) {
+			result = append(result, c)
+		}
+	}
+	return result
 }
 
 var cmdList = []cmdItem{
@@ -405,24 +405,14 @@ func (m Model) showCmdList() Model {
 	m.cmdPage = 0
 	m.cmdCursor = 0
 
-	const compactHeaderHeight = 3
-	const itemsPerPage = 5
-	total := len(cmdList)
-	totalPages := (total + itemsPerPage - 1) / itemsPerPage
-	cmdLines := 2 + itemsPerPage
-	if totalPages > 1 {
-		cmdLines += 2
-	}
-	available := m.termHeight - compactHeaderHeight - inputBoxHeight
-	m.viewPort.SetHeight(available - cmdLines)
-
 	m.mode = modeCmd
-	return m
+	return m.syncLayout()
 }
 
 func (m Model) onCmdKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
+	cmds := filteredCmdList(m)
 	const itemsPerPage = 5
-	total := len(cmdList)
+	total := len(cmds)
 	totalPages := (total + itemsPerPage - 1) / itemsPerPage
 	itemsOnPage := itemsPerPage
 	start := m.cmdPage * itemsPerPage
@@ -451,16 +441,26 @@ func (m Model) onCmdKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			m.cmdCursor = itemsOnPrev - 1
 		}
 		return m, nil
+	case "tab":
+		if total > 0 {
+			idx := m.cmdPage*itemsPerPage + m.cmdCursor
+			if idx < total {
+				m.mode = modeInsert
+				m.inputText.Focus()
+				m.inputText.SetValue(cmds[idx].Name)
+				m.inputText.SetCursor(len(cmds[idx].Name))
+				return m.syncLayout(), nil
+			}
+		}
+		return m, nil
 	case "enter":
-		input := m.inputText.Value()
-		if input != "/" && input != "" {
-			return m.executeCommand(input)
+		if total > 0 {
+			idx := m.cmdPage*itemsPerPage + m.cmdCursor
+			if idx < total {
+				return m.executeCommand(cmds[idx].Name)
+			}
 		}
-		idx := m.cmdPage*itemsPerPage + m.cmdCursor
-		if idx >= total {
-			return m, nil
-		}
-		return m.handleCmdSelect(cmdList[idx].Name)
+		return m, nil
 	case "esc", "ctrl+c":
 		return m.handleCmdCancel()
 	default:
@@ -471,6 +471,8 @@ func (m Model) onCmdKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		if !strings.HasPrefix(m.inputText.Value(), "/") {
 			return m.handleCmdCancel()
 		}
+		m.cmdPage = 0
+		m.cmdCursor = 0
 		return m, tea.Batch(cmd, vpCmd)
 	}
 }
@@ -480,7 +482,7 @@ func (m Model) executeCommand(input string) (Model, tea.Cmd) {
 	m.inputText.Focus()
 	m.inputText.Placeholder = "Ask anything ..."
 	m.inputText.SetValue("")
-	m.viewPort.SetHeight(m.termHeight - splashHeight - inputBoxHeight)
+	m = m.syncLayout()
 	parts := strings.Fields(input)
 	if len(parts) == 2 && parts[0] == "/session" && parts[1] == "new" {
 		m.sessionId = ""
@@ -497,8 +499,7 @@ func (m Model) handleCmdSelect(cmd string) (Model, tea.Cmd) {
 	m.inputText.Placeholder = "Ask anything ..."
 	m.inputText.SetValue(cmd)
 	m.inputText.SetCursor(len(cmd))
-	m.viewPort.SetHeight(m.termHeight - splashHeight - inputBoxHeight)
-	return m, nil
+	return m.syncLayout(), nil
 }
 
 func (m Model) handleCmdCancel() (Model, tea.Cmd) {
@@ -506,6 +507,5 @@ func (m Model) handleCmdCancel() (Model, tea.Cmd) {
 	m.inputText.Focus()
 	m.inputText.Placeholder = "Ask anything ..."
 	m.inputText.SetValue("")
-	m.viewPort.SetHeight(m.termHeight - splashHeight - inputBoxHeight)
-	return m, nil
+	return m.syncLayout(), nil
 }

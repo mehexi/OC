@@ -8,17 +8,21 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-func ChatView(m Model) tea.View {
-	inputBox := RenderInputBox(m)
-
-	var header string
-
+func (m Model) renderHeader() string {
 	switch m.mode {
 	case modeQus, modeSession, modeCmd:
-		header = compactSplash(m)
+		return compactSplash(m)
 	default:
-		header = RenderSplash(m)
+		if m.termHeight < 30 {
+			return compactSplash(m)
+		}
+		return RenderSplash(m)
 	}
+}
+
+func ChatView(m Model) tea.View {
+	inputBox := RenderInputBox(m)
+	header := m.renderHeader()
 
 	var body string
 
@@ -42,13 +46,6 @@ func ChatView(m Model) tea.View {
 			renderCmdView(m),
 		)
 	default:
-		if m.termHeight < 30 {
-			header = compactSplash(m)
-			headerHeight := lipgloss.Height(header)
-			available := m.termHeight - headerHeight - inputBoxHeight
-			m.viewPort.SetHeight(available)
-		}
-
 		body = m.viewPort.View()
 	}
 
@@ -94,7 +91,8 @@ func renderQusView(m Model) string {
 
 func renderCmdView(m Model) string {
 	const itemsPerPage = 5
-	total := len(cmdList)
+	cmds := filteredCmdList(m)
+	total := len(cmds)
 	totalPages := (total + itemsPerPage - 1) / itemsPerPage
 	start := m.cmdPage * itemsPerPage
 
@@ -108,7 +106,7 @@ func renderCmdView(m Model) string {
 			lines = append(lines, "")
 			continue
 		}
-		item := cmdList[idx]
+		item := cmds[idx]
 		prefix := "  "
 		style := lipgloss.NewStyle()
 		if i == m.cmdCursor {
@@ -184,23 +182,50 @@ func RenderChatBubble(msg ChatMessage, m Model) string {
 	return body
 }
 
+func inputModeTag(m Model) string {
+	label := " NORMAL "
+	fg := lipgloss.Color("#888888")
+
+	switch m.mode {
+	case modeInsert:
+		label = " INSERT"
+		fg = cyanColor
+	case modeVisual:
+		label = " VISUAL "
+		fg = orangeColor
+	case modeQus:
+		label = " QUESTION "
+		fg = greenColor
+	case modeSession:
+		label = " SESSIONS "
+		fg = cyanColor
+	case modeCmd:
+		label = " COMMANDS "
+		fg = cyanColor
+	}
+
+	return lipgloss.NewStyle().
+		Foreground(fg).
+		Background(lipgloss.Color("#333333")).
+		Padding(0, 0).
+		Render(label)
+}
+
 func RenderInputBox(m Model) string {
 
-	mode := modeTag(m)
+	mode := inputModeTag(m)
 	input := m.inputText.View()
 
 	if m.loading {
 		input = nextSpinner() + " thinking"
 	}
 
-	content := lipgloss.JoinHorizontal(lipgloss.Center, mode, input)
+	content := lipgloss.JoinHorizontal(lipgloss.Center, mode, " ", input)
 
 	return lipgloss.NewStyle().
 		Width(m.width).
 		Border(lipgloss.NormalBorder()).
 		BorderLeft(false).BorderRight(false).
 		Padding(0, 1).
-		Render(
-			content,
-		)
+		Render(content)
 }

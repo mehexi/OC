@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"oc/internal/api"
 	"oc/internal/history"
+	"oc/internal/server"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -260,6 +261,10 @@ func (m Model) handleCommand(input string) tea.Cmd {
 	switch parts[0] {
 	case "/sessions":
 		return m.showSessionListCmd()
+
+	case "/exit":
+		server.KillServer()
+		return tea.Quit
 
 	case "/load":
 		if len(parts) < 2 {

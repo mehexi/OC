@@ -107,7 +107,7 @@ func (m Model) onControlRequest(msg ControlRequestMsg) (Model, tea.Cmd) {
 		}
 		m.awaitingResponse = false
 		if m.pendingControl != nil {
-			m.viewPort.SetHeight(m.termHeight - splashHeight - inputBoxHeight)
+			m = m.syncLayout()
 			var sb strings.Builder
 			sb.WriteString("Answers:\n")
 			for i, q := range m.pendingControl.Data.Questions {
@@ -241,15 +241,53 @@ func (m Model) onLoadSession(msg LoadSessionMsg) (Model, tea.Cmd) {
 	return m, m.fetchSessionUsage()
 }
 
-const splashHeight = 17
 const inputBoxHeight = 3
+
+func (m Model) viewportHeight() int {
+	headerHeight := lipgloss.Height(m.renderHeader())
+	available := m.termHeight - headerHeight - inputBoxHeight
+	if available < 1 {
+		available = 1
+	}
+	switch m.mode {
+	case modeQus:
+		available -= m.qusHeight
+	case modeSession:
+		sessionLines := 2 + 5
+		total := len(m.sessions)
+		totalPages := (total + 5 - 1) / 5
+		if totalPages > 1 {
+			sessionLines += 2
+		}
+		available -= sessionLines
+	case modeCmd:
+		cmds := filteredCmdList(m)
+		cmdLines := 2 + 5
+		total := len(cmds)
+		totalPages := (total + 5 - 1) / 5
+		if totalPages > 1 {
+			cmdLines += 2
+		}
+		available -= cmdLines
+	}
+	if available < 1 {
+		available = 1
+	}
+	return available
+}
+
+func (m Model) syncLayout() Model {
+	m.viewPort.SetWidth(m.width)
+	m.viewPort.SetHeight(m.viewportHeight())
+	m.inputText.SetWidth(m.width - 6)
+	return m
+}
 
 // onWindowSize updates layout dimensions when the terminal is resized.
 func (m Model) onWindowSize(msg tea.WindowSizeMsg) (Model, tea.Cmd) {
 	m.width = msg.Width
 	m.termHeight = msg.Height
-	m.viewPort.SetWidth(msg.Width)
-	m.viewPort.SetHeight(msg.Height - splashHeight - inputBoxHeight)
+	m = m.syncLayout()
 	return m, nil
 }
 
