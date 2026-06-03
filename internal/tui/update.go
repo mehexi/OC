@@ -109,6 +109,7 @@ func (m Model) onControlRequest(msg ControlRequestMsg) (Model, tea.Cmd) {
 		}
 		m.awaitingResponse = false
 		if m.pendingControl != nil {
+			m.viewPort.SetHeight(m.termHeight - splashHeight - inputBoxHeight)
 			var sb strings.Builder
 			sb.WriteString("Answers:\n")
 			for i, q := range m.pendingControl.Data.Questions {
@@ -144,29 +145,10 @@ func (m Model) onControlRequest(msg ControlRequestMsg) (Model, tea.Cmd) {
 	m.questionAnswers = nil
 	m.awaitingResponse = true
 	m.loading = false
-	m.mode = modeInsert
-	m.inputText.Focus()
-	m.inputText.Placeholder = "Answer..."
-	m.inputText.SetValue("")
 
-	content := formatQuestion(msg.Request.Data.Questions[0])
-	m.messages = append(m.messages, ChatMessage{Role: "assistant", Content: content})
-	return m.refreshMessages(), nil
-}
-
-func formatQuestion(q api.QuestionData) string {
-	var b strings.Builder
-	b.WriteString("── " + q.Header + " ──\n\n")
-	b.WriteString(q.Question + "\n\n")
-	for i, opt := range q.Options {
-		b.WriteString(fmt.Sprintf("  %d. %s", i+1, opt.Label))
-		if opt.Description != "" {
-			b.WriteString("  (" + opt.Description + ")")
-		}
-		b.WriteString("\n")
-	}
-	b.WriteString("\nType your answer and press Enter.")
-	return b.String()
+	m.messages = append(m.messages, ChatMessage{Role: "assistant", Content: msg.Request.Data.Questions[0].Header})
+	m = m.refreshMessages()
+	return m.showQusList(), nil
 }
 
 // onStreamMsg handles SSE streaming chunks from the AI response.
@@ -267,6 +249,7 @@ const inputBoxHeight = 3
 // onWindowSize updates layout dimensions when the terminal is resized.
 func (m Model) onWindowSize(msg tea.WindowSizeMsg) (Model, tea.Cmd) {
 	m.width = msg.Width
+	m.termHeight = msg.Height
 	m.viewPort.SetWidth(msg.Width)
 	m.viewPort.SetHeight(msg.Height - splashHeight - inputBoxHeight)
 	return m, nil
@@ -281,6 +264,8 @@ func (m Model) onKeyPress(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m.onInsertKey(msg)
 	case modeVisual:
 		return m.onVisualKey(msg)
+	case modeQus:
+		return m.onQusKey(msg)
 	default:
 		return m.onInsertKey(msg)
 	}

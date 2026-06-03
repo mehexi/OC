@@ -4,6 +4,7 @@ import (
 	"oc/internal/api"
 	"oc/internal/history"
 
+	"charm.land/bubbles/v2/list"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
@@ -21,7 +22,16 @@ const (
 	modeInsert VimMode = iota
 	modeNormal
 	modeVisual
+	modeQus
 )
+
+type qusItem struct {
+	label, desc string
+}
+
+func (i qusItem) Title() string       { return i.label }
+func (i qusItem) Description() string  { return i.desc }
+func (i qusItem) FilterValue() string  { return i.label }
 
 type ChatMessage struct {
 	Role    string
@@ -40,23 +50,27 @@ type Model struct {
 	questionAnswers    []string
 	awaitingResponse   bool
 	width              int
-	serverAddr         string
-	serverErr          error
 
+	// TIPS:: serevr and stuff
+	serverAddr    string
+	serverErr     error
 	client        *api.Client
 	healthChecked bool
 	healthStatus  *api.HealthResponse
 	healthErr     error
+	modelName     string
+	tokensUsed    int
+	contextLimit  int
+	currentPath   string
 
-	modelName    string
-	tokensUsed   int
-	contextLimit int
-	currentPath  string
-
+	// TIP: modes and stuff
 	mode         VimMode
 	visualAnchor int
 	visualCursor int
 	awaitingGG   bool
+	qusList      list.Model
+	qusHeight    int
+	termHeight   int
 }
 
 type ServerStartedMsg struct {
@@ -122,10 +136,12 @@ func IntialModel() Model {
 	ti.SetStyles(s)
 
 	vp := viewport.New()
+	ql := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 3)
 
 	return Model{
 		viewPort:  vp,
 		inputText: ti,
+		qusList:   ql,
 		messages:  []ChatMessage{},
 		sessionId: "",
 		loading:   false,

@@ -7,18 +7,42 @@ import (
 
 func ChatView(m Model) tea.View {
 	inputBox := RenderInputBox(m)
-	welcomeMsg := RenderSplash(m)
+
+	var header string
+	if m.mode == modeQus {
+		header = compactSplash(m)
+	} else {
+		header = RenderSplash(m)
+	}
+
+	var body string
+	if m.mode == modeQus {
+		qusView := renderQusView(m)
+		body = lipgloss.JoinVertical(
+			lipgloss.Top,
+			m.viewPort.View(),
+			qusView,
+		)
+	} else {
+		body = m.viewPort.View()
+	}
 
 	content := lipgloss.JoinVertical(
 		lipgloss.Top,
-		welcomeMsg,
-		m.viewPort.View(),
+		header,
+		body,
 		inputBox,
 	)
 
 	v := tea.NewView(content)
 	v.AltScreen = true
 	return v
+}
+
+func renderQusView(m Model) string {
+	return lipgloss.NewStyle().
+		Padding(0, 2).
+		Render(m.qusList.View())
 }
 
 func RenderChatBubble(msg ChatMessage, m Model) string {

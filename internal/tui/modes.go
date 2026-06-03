@@ -5,7 +5,9 @@ import (
 	"oc/internal/server"
 	"strings"
 
+	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/atotto/clipboard"
 )
 
@@ -67,9 +69,6 @@ func (m Model) onNormalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		if input == "" {
 			return m, nil
 		}
-		if m.awaitingResponse {
-			return m.handleQuestionAnswer(input)
-		}
 		if !m.loading && !m.streaming {
 			if strings.HasPrefix(input, "/") {
 				m.inputText.SetValue("")
@@ -118,9 +117,6 @@ func (m Model) onInsertKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		if input == "" {
 			return m, nil
 		}
-		if m.awaitingResponse {
-			return m.handleQuestionAnswer(input)
-		}
 		if !m.loading && !m.streaming {
 			if strings.HasPrefix(input, "/") {
 				m.inputText.SetValue("")
@@ -156,27 +152,6 @@ func (m Model) onInsertKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		m.viewPort, vpCmd = m.viewPort.Update(msg)
 		return m, tea.Batch(cmd, vpCmd)
 	}
-}
-
-func (m Model) handleQuestionAnswer(input string) (Model, tea.Cmd) {
-	m.questionAnswers = append(m.questionAnswers, input)
-	m.messages = append(m.messages, ChatMessage{Role: "user", Content: input})
-	m = m.refreshMessages()
-	m.inputText.SetValue("")
-
-	if m.currentQuestionIdx+1 < len(m.pendingControl.Data.Questions) {
-		m.currentQuestionIdx++
-		content := formatQuestion(m.pendingControl.Data.Questions[m.currentQuestionIdx])
-		m.messages = append(m.messages, ChatMessage{Role: "assistant", Content: content})
-		m.mode = modeInsert
-		m.inputText.Focus()
-		m.loading = false
-		return m.refreshMessages(), nil
-	}
-
-	m.awaitingResponse = false
-	m.loading = true
-	return m, m.sendControlResponse()
 }
 
 func (m Model) onVisualKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
@@ -224,5 +199,105 @@ func (m Model) onVisualKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		var vpCmd tea.Cmd
 		m.viewPort, vpCmd = m.viewPort.Update(msg)
 		return m, vpCmd
+	}
+}
+
+func (m Model) showQusList() Model {
+	q := m.pendingControl.Data.Questions[m.currentQuestionIdx]
+	items := make([]list.Item, len(q.Options))
+	for i, opt := range q.Options {
+		items[i] = qusItem{label: opt.Label, desc: opt.Description}
+	}
+
+	del := list.NewDefaultDelegate()
+	del.SetHeight(1)
+	del.SetSpacing(0)
+	del.ShowDescription = false
+	del.Styles.NormalTitle = lipgloss.NewStyle().Foreground(whiteColor).Padding(0, 2, 0, 2)
+	del.Styles.SelectedTitle = lipgloss.NewStyle().Foreground(cyanColor).Bold(true).Padding(0, 2, 0, 2)
+	del.Styles.DimmedTitle = lipgloss.NewStyle().Foreground(mutedColor).Padding(0, 2, 0, 2)
+
+	m.qusList.SetDelegate(del)
+	m.qusList.SetItems(items)
+	m.qusList.Title = q.Header + "  (" + q.Question + ")"
+	m.qusList.SetFilteringEnabled(false)
+	m.qusList.SetShowTitle(true)
+	m.qusList.SetShowPagination(false)
+	m.qusList.SetShowHelp(false)
+	m.qusList.SetShowStatusBar(false)
+	m.qusList.KeyMap.Quit.SetEnabled(false)
+	m.qusList.Select(0)
+	m.qusList.Styles.Title = lipgloss.NewStyle().Foreground(cyanColor).Bold(true)
+	m.qusList.Styles.TitleBar = lipgloss.NewStyle().Padding(0, 0, 0, 2).Border(lipgloss.NormalBorder()).BorderBottom(true).BorderLeft(false).BorderRight(false).BorderTop(false).BorderForeground(cyanColor)
+
+	const compactHeaderHeight = 3
+	available := m.termHeight - compactHeaderHeight - inputBoxHeight
+	qusHeight := min(len(items)+2, available-3)
+	m.qusList.SetSize(m.width, qusHeight)
+	m.qusHeight = qusHeight
+	m.viewPort.SetHeight(available - qusHeight)
+
+	m.mode = modeQus
+	m.inputText.Blur()
+	return m
+}
+
+func (m Model) handleQusAnswer() (Model, tea.Cmd) {
+	selected := m.qusList.SelectedItem().(qusItem)
+	answer := selected.label
+
+	m.questionAnswers = append(m.questionAnswers, answer)
+	m.messages = append(m.messages, ChatMessage{Role: "user", Content: answer})
+	m = m.refreshMessages()
+
+	m.currentQuestionIdx++
+	if m.currentQuestionIdx < len(m.pendingControl.Data.Questions) {
+		return m.showQusList(), nil
+	}
+
+	m.awaitingResponse = false
+	m.mode = modeInsert
+	m.inputText.Focus()
+	m.inputText.Placeholder = "Ask anything ..."
+	m.viewPort.SetHeight(m.termHeight - splashHeight - inputBoxHeight)
+	m.qusHeight = 0
+	m.loading = true
+	return m, m.sendControlResponse()
+}
+
+func (m Model) handleQusCancel() (Model, tea.Cmd) {
+	m.pendingControl = nil
+	m.currentQuestionIdx = 0
+	m.questionAnswers = nil
+	m.awaitingResponse = false
+	m.mode = modeInsert
+	m.inputText.Focus()
+	m.inputText.Placeholder = "Ask anything ..."
+	m.viewPort.SetHeight(m.termHeight - splashHeight - inputBoxHeight)
+	m.qusHeight = 0
+	m.messages = append(m.messages, ChatMessage{Role: "assistant", Content: "Question cancelled."})
+	return m.refreshMessages(), nil
+}
+
+func (m Model) onQusKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
+	switch msg.String() {
+	case "j", "down":
+		m.qusList, _ = m.qusList.Update(msg)
+		return m, nil
+	case "k", "up":
+		m.qusList, _ = m.qusList.Update(msg)
+		return m, nil
+	case "enter":
+		selected := m.qusList.SelectedItem()
+		if selected == nil {
+			return m, nil
+		}
+		return m.handleQusAnswer()
+	case "esc", "ctrl+c":
+		return m.handleQusCancel()
+	default:
+		var cmd tea.Cmd
+		m.qusList, cmd = m.qusList.Update(msg)
+		return m, cmd
 	}
 }

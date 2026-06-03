@@ -7,6 +7,19 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
+func compactSplash(m Model) string {
+	status := lipgloss.NewStyle().Foreground(mutedColor).Render("● Connected")
+	if m.healthStatus != nil && m.healthStatus.Healthy {
+		status = lipgloss.NewStyle().Foreground(greenColor).Render("● Connected  v" + m.healthStatus.Version)
+	} else {
+		status = lipgloss.NewStyle().Foreground(orangeColor).Render("● Connecting...")
+	}
+	return lipgloss.JoinVertical(lipgloss.Left,
+		modeTag(m),
+		lipgloss.NewStyle().Width(m.width).Padding(0, 2).Render(status),
+	)
+}
+
 func modeTag(m Model) string {
 	label := "  NORMAL  "
 	fg := lipgloss.Color("#888888")
@@ -18,6 +31,9 @@ func modeTag(m Model) string {
 	case modeVisual:
 		label = "  VISUAL  "
 		fg = orangeColor
+	case modeQus:
+		label = "  QUESTION  "
+		fg = greenColor
 	}
 
 	return lipgloss.NewStyle().
