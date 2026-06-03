@@ -115,7 +115,7 @@ func (m Model) onControlRequest(msg ControlRequestMsg) (Model, tea.Cmd) {
 				if i < len(m.questionAnswers) {
 					a = m.questionAnswers[i]
 				}
-				sb.WriteString(fmt.Sprintf("- %s: %s\n", q.Header, a))
+				fmt.Fprintf(&sb, "- %s: %s\n", q.Header, a)
 			}
 			m.pendingControl = nil
 			m.currentQuestionIdx = 0

@@ -5,6 +5,7 @@ import (
 	"oc/internal/history"
 	"oc/internal/server"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/atotto/clipboard"
@@ -43,7 +44,7 @@ func (m Model) onNormalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		m.viewPort.GotoBottom()
 		return m, nil
 
-	case "V":
+	case "v":
 		m.awaitingGG = false
 		if len(m.messages) == 0 {
 			return m, nil
@@ -155,12 +156,10 @@ func (m Model) onInsertKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	default:
 		var cmd tea.Cmd
 		m.inputText, cmd = m.inputText.Update(msg)
-		var vpCmd tea.Cmd
-		m.viewPort, vpCmd = m.viewPort.Update(msg)
 		if strings.HasPrefix(m.inputText.Value(), "/") {
-			return m.showCmdList(), tea.Batch(cmd, vpCmd)
+			return m.showCmdList(), cmd
 		}
-		return m, tea.Batch(cmd, vpCmd)
+		return m, cmd
 	}
 }
 
@@ -169,12 +168,14 @@ func (m Model) onVisualKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	case "j":
 		if m.visualCursor < len(m.messages)-1 {
 			m.visualCursor++
+			m = m.refreshMessages()
 			m.viewPort.ScrollDown(3)
 		}
 		return m, nil
 
 	case "k":
 		if m.visualCursor > 0 {
+			m = m.refreshMessages()
 			m.visualCursor--
 			m.viewPort.ScrollUp(3)
 		}
@@ -198,6 +199,9 @@ func (m Model) onVisualKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		}
 		m.mode = modeNormal
 		m.inputText.SetValue(fmt.Sprintf("Yanked %d message(s)", hi-lo+1))
+		time.AfterFunc(3*time.Second, func() {
+			m.inputText.SetValue("")
+		})
 		m.inputText.SetCursor(len(m.inputText.Value()))
 		return m, nil
 
@@ -392,6 +396,7 @@ func (m Model) handleSessionCancel() (Model, tea.Cmd) {
 
 var cmdList = []cmdItem{
 	{Name: "/sessions", Category: "history", Description: "List and load past sessions"},
+	{Name: "/exit", Category: "exit", Description: "exit from app"},
 	{Name: "/session new", Category: "history", Description: "Start a fresh session"},
 	{Name: "/load <n>", Category: "history", Description: "Load session by number"},
 }

@@ -12,6 +12,7 @@ func ChatView(m Model) tea.View {
 	inputBox := RenderInputBox(m)
 
 	var header string
+
 	switch m.mode {
 	case modeQus, modeSession, modeCmd:
 		header = compactSplash(m)
@@ -20,6 +21,7 @@ func ChatView(m Model) tea.View {
 	}
 
 	var body string
+
 	switch m.mode {
 	case modeQus:
 		body = lipgloss.JoinVertical(
@@ -40,6 +42,13 @@ func ChatView(m Model) tea.View {
 			renderCmdView(m),
 		)
 	default:
+		if m.termHeight < 30 {
+			header = compactSplash(m)
+			headerHeight := lipgloss.Height(header)
+			available := m.termHeight - headerHeight - inputBoxHeight
+			m.viewPort.SetHeight(available)
+		}
+
 		body = m.viewPort.View()
 	}
 
@@ -176,11 +185,15 @@ func RenderChatBubble(msg ChatMessage, m Model) string {
 }
 
 func RenderInputBox(m Model) string {
+
+	mode := modeTag(m)
 	input := m.inputText.View()
 
 	if m.loading {
-		input = "… " + input
+		input = nextSpinner() + " thinking"
 	}
+
+	content := lipgloss.JoinHorizontal(lipgloss.Center, mode, input)
 
 	return lipgloss.NewStyle().
 		Width(m.width).
@@ -188,6 +201,6 @@ func RenderInputBox(m Model) string {
 		BorderLeft(false).BorderRight(false).
 		Padding(0, 1).
 		Render(
-			input,
+			content,
 		)
 }

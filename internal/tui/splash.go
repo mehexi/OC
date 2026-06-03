@@ -26,7 +26,7 @@ func modeTag(m Model) string {
 
 	switch m.mode {
 	case modeInsert:
-		label = "  INSERT  iiii"
+		label = "  INSERT"
 		fg = cyanColor
 	case modeVisual:
 		label = "  VISUAL  "
@@ -94,7 +94,6 @@ func RenderSplash(m Model) string {
 	)
 
 	content := lipgloss.JoinVertical(lipgloss.Left,
-		modeTag(m),
 		body,
 	)
 

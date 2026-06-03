@@ -67,14 +67,14 @@ type Model struct {
 	currentPath   string
 
 	// TIP: modes and stuff
-	mode         VimMode
-	visualAnchor int
-	visualCursor int
-	awaitingGG   bool
-	qusItems     []qusItem
-	qusCursor    int
-	qusHeight    int
-	termHeight   int
+	mode          VimMode
+	visualAnchor  int
+	visualCursor  int
+	awaitingGG    bool
+	qusItems      []qusItem
+	qusCursor     int
+	qusHeight     int
+	termHeight    int
 	sessions      []history.SessionSummary
 	sessionPage   int
 	sessionCursor int
