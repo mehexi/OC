@@ -6,13 +6,20 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 )
+
+var program *tea.Program
+
+func SetProgram(p *tea.Program) {
+	program = p
+}
 
 type VimMode int
 
 const (
-	modeNormal VimMode = iota
-	modeInsert
+	modeInsert VimMode = iota
+	modeNormal
 	modeVisual
 )
 
@@ -22,24 +29,29 @@ type ChatMessage struct {
 }
 
 type Model struct {
-	viewPort   viewport.Model
-	inputText  textinput.Model
-	messages   []ChatMessage
-	sessionId  string
-	loading    bool
-	width      int
-	serverAddr string
-	serverErr  error
+	viewPort           viewport.Model
+	inputText          textinput.Model
+	messages           []ChatMessage
+	sessionId          string
+	loading            bool
+	streaming          bool
+	pendingControl     *api.ControlRequest
+	currentQuestionIdx int
+	questionAnswers    []string
+	awaitingResponse   bool
+	width              int
+	serverAddr         string
+	serverErr          error
 
 	client        *api.Client
 	healthChecked bool
 	healthStatus  *api.HealthResponse
 	healthErr     error
 
-	modelName     string
-	tokensUsed    int
-	contextLimit  int
-	currentPath   string
+	modelName    string
+	tokensUsed   int
+	contextLimit int
+	currentPath  string
 
 	mode         VimMode
 	visualAnchor int
@@ -63,6 +75,20 @@ type ChatResponseMsg struct {
 	SessionID string
 	ModelName string
 	Err       error
+}
+
+type ChatStreamMsg struct {
+	Text      string
+	SessionID string
+	FullText  string
+	Done      bool
+	ModelName string
+	Err       error
+}
+
+type ControlRequestMsg struct {
+	Request *api.ControlRequest
+	Err     error
 }
 
 type LoadSessionMsg struct {
@@ -91,6 +117,9 @@ func IntialModel() Model {
 	ti.Placeholder = "Ask anything ..."
 	ti.SetWidth(50)
 	ti.Focus()
+	s := ti.Styles()
+
+	ti.SetStyles(s)
 
 	vp := viewport.New()
 
@@ -101,6 +130,6 @@ func IntialModel() Model {
 		sessionId: "",
 		loading:   false,
 		width:     0,
-		mode:      modeNormal,
+		mode:      modeInsert,
 	}
 }

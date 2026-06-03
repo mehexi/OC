@@ -2,14 +2,42 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
+	"os"
+	"sync"
+	"time"
 )
+
+var sseLog *os.File
+
+func initSSELog() {
+	f, err := os.OpenFile("/tmp/oc-sse.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err == nil {
+		sseLog = f
+	}
+}
+
+func DebugSSE(format string, args ...interface{}) {
+	if sseLog == nil {
+		initSSELog()
+	}
+	if sseLog != nil {
+		fmt.Fprintf(sseLog, format+"\n", args...)
+	}
+}
 
 type Client struct {
 	baseURL    string
 	httpClient *http.Client
+	Debug      bool
+	LogFile    string
+	Directory  string
+	mu         sync.Mutex
 }
 
 type HealthResponse struct {
@@ -50,8 +78,134 @@ type ProvidersResponse struct {
 	Default   map[string]string        `json:"default"`
 }
 
+func (c *Client) readBody(req *http.Request, resp *http.Response) ([]byte, error) {
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return nil, err
+	}
+	c.logResp(req, resp, body)
+	return body, nil
+}
+
+func (c *Client) logResp(req *http.Request, resp *http.Response, body []byte) {
+	if !c.Debug {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	f, err := os.OpenFile(c.LogFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "\n[API] %s %s\n", req.Method, req.URL)
+	fmt.Fprintf(f, "  Status: %d\n", resp.StatusCode)
+	fmt.Fprintf(f, "  Body: %s\n\n", string(body))
+}
+
+type QuestionOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description"`
+}
+
+type QuestionData struct {
+	Question string           `json:"question"`
+	Header   string           `json:"header"`
+	Options  []QuestionOption `json:"options"`
+	Multiple bool             `json:"multiple,omitempty"`
+}
+
+type SSEMessage struct {
+	Payload SSEMessagePayload `json:"payload"`
+}
+
+type SSEMessagePayload struct {
+	ID         string          `json:"id"`
+	Type       string          `json:"type"`
+	Properties json.RawMessage `json:"properties"`
+}
+
+type QuestionProperties struct {
+	ID        string         `json:"id"`
+	SessionID string         `json:"sessionID"`
+	Questions []QuestionData `json:"questions"`
+}
+
+type ControlRequest struct {
+	ID   string             `json:"id"`
+	Type string             `json:"type"`
+	Data ControlRequestData `json:"data"`
+}
+
+type ControlRequestData struct {
+	Questions []QuestionData `json:"questions"`
+}
+
+func (c *Client) SubscribeGlobalEvents(ctx context.Context) (*http.Response, error) {
+	DebugSSE("SubscribeGlobalEvents: connecting to %s/global/event (dir=%q)", c.baseURL, c.Directory)
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/global/event", nil)
+	if err != nil {
+		DebugSSE("SubscribeGlobalEvents: new request error: %v", err)
+		return nil, err
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Cache-Control", "no-cache")
+	if c.Directory != "" {
+		req.Header.Set("x-opencode-directory", c.Directory)
+	}
+
+	httpClient := &http.Client{
+		Transport: c.httpClient.Transport,
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		DebugSSE("SubscribeGlobalEvents: Do error: %v", err)
+		return nil, err
+	}
+	DebugSSE("SubscribeGlobalEvents: status=%d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return nil, fmt.Errorf("subscribe events: unexpected status %d", resp.StatusCode)
+	}
+	return resp, nil
+}
+
+func (c *Client) ReplyToQuestion(id string, answers [][]string) error {
+	b, _ := json.Marshal(map[string][][]string{"answers": answers})
+	req, err := http.NewRequest("POST", c.baseURL+"/question/"+id+"/reply", bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.Directory != "" {
+		req.Header.Set("x-opencode-directory", c.Directory)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("reply to question: unexpected status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func New(baseURL string) *Client {
+	transport := &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout: 10 * time.Second,
+		}).DialContext,
+	}
+	return &Client{baseURL: baseURL, httpClient: &http.Client{Transport: transport}}
+}
+
 func (c *Client) GetProviders() (*ProvidersResponse, error) {
-	req, err := http.NewRequest("GET", c.baseURL+"/config/providers", nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/config/providers", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -59,19 +213,24 @@ func (c *Client) GetProviders() (*ProvidersResponse, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	body, err := c.readBody(req, resp)
+	if err != nil {
+		return nil, err
+	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("get providers: unexpected status %d", resp.StatusCode)
+		return nil, fmt.Errorf("get providers: unexpected status %d: %s", resp.StatusCode, string(body))
 	}
 	var result ProvidersResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
 func (c *Client) GetPath() (string, error) {
-	req, err := http.NewRequest("GET", c.baseURL+"/path", nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/path", nil)
 	if err != nil {
 		return "", err
 	}
@@ -79,24 +238,31 @@ func (c *Client) GetPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("get path: unexpected status %d", resp.StatusCode)
-	}
-	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	body, err := c.readBody(req, resp)
+	if err != nil {
 		return "", err
 	}
-	if p, ok := result["path"]; ok {
-		if s, ok := p.(string); ok {
-			return s, nil
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("get path: unexpected status %d: %s", resp.StatusCode, string(body))
+	}
+	var result map[string]interface{}
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&result); err != nil {
+		return "", err
+	}
+	for _, key := range []string{"directory", "worktree", "path"} {
+		if p, ok := result[key]; ok {
+			if s, ok := p.(string); ok {
+				return s, nil
+			}
 		}
 	}
 	return "", nil
 }
 
 func (c *Client) GetSession(id string) (map[string]interface{}, error) {
-	req, err := http.NewRequest("GET", c.baseURL+"/session/"+id, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/session/"+id, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -104,24 +270,25 @@ func (c *Client) GetSession(id string) (map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	body, err := c.readBody(req, resp)
+	if err != nil {
+		return nil, err
+	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("get session: unexpected status %d", resp.StatusCode)
+		return nil, fmt.Errorf("get session: unexpected status %d: %s", resp.StatusCode, string(body))
 	}
 	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&result); err != nil {
 		return nil, err
 	}
 	return result, nil
 }
 
-func New(baseURL string) *Client {
-	return &Client{baseURL: baseURL, httpClient: http.DefaultClient}
-}
-
 func (c *Client) CreateSession(title string) (string, error) {
 	body, _ := json.Marshal(map[string]string{"title": title})
-	req, err := http.NewRequest("POST", c.baseURL+"/session", bytes.NewReader(body))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/session", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
@@ -131,14 +298,16 @@ func (c *Client) CreateSession(title string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
-
+	b, err := c.readBody(req, resp)
+	if err != nil {
+		return "", err
+	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("create session: unexpected status %d", resp.StatusCode)
+		return "", fmt.Errorf("create session: unexpected status %d: %s", resp.StatusCode, string(b))
 	}
 
 	var s sessionResponse
-	if err := json.NewDecoder(resp.Body).Decode(&s); err != nil {
+	if err := json.NewDecoder(bytes.NewReader(b)).Decode(&s); err != nil {
 		return "", err
 	}
 	return s.ID, nil
@@ -158,14 +327,16 @@ func (c *Client) SendMessage(sessionID, text string) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	defer resp.Body.Close()
-
+	b, err := c.readBody(req, resp)
+	if err != nil {
+		return "", "", err
+	}
 	if resp.StatusCode != http.StatusOK {
-		return "", "", fmt.Errorf("send message: unexpected status %d", resp.StatusCode)
+		return "", "", fmt.Errorf("send message: unexpected status %d: %s", resp.StatusCode, string(b))
 	}
 
 	var msg sendMessageResponse
-	if err := json.NewDecoder(resp.Body).Decode(&msg); err != nil {
+	if err := json.NewDecoder(bytes.NewReader(b)).Decode(&msg); err != nil {
 		return "", "", err
 	}
 
@@ -177,8 +348,22 @@ func (c *Client) SendMessage(sessionID, text string) (string, string, error) {
 	return "", "", fmt.Errorf("no text part in response")
 }
 
+func (c *Client) SendMessageRaw(sessionID, text string) (*http.Response, error) {
+	body, _ := json.Marshal(sendMessageRequest{
+		Parts: []messagePart{{Type: "text", Text: text}},
+	})
+	req, err := http.NewRequest("POST", c.baseURL+"/session/"+sessionID+"/message", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return c.httpClient.Do(req)
+}
+
 func (c *Client) Health() (*HealthResponse, error) {
-	req, err := http.NewRequest("GET", c.baseURL+"/global/health", nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/global/health", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -187,14 +372,16 @@ func (c *Client) Health() (*HealthResponse, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-
+	b, err := c.readBody(req, resp)
+	if err != nil {
+		return nil, err
+	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status: %d", resp.StatusCode)
+		return nil, fmt.Errorf("unexpected status: %d: %s", resp.StatusCode, string(b))
 	}
 
 	var result HealthResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.NewDecoder(bytes.NewReader(b)).Decode(&result); err != nil {
 		return nil, err
 	}
 

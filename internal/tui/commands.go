@@ -1,7 +1,13 @@
 package tui
 
 import (
+	"bufio"
+	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"oc/internal/api"
 	"oc/internal/history"
 	"strings"
 
@@ -14,16 +20,154 @@ func (m Model) sendChat(text string) tea.Cmd {
 		if sessionID == "" {
 			id, err := m.client.CreateSession(text)
 			if err != nil {
-				return ChatResponseMsg{Err: err}
+				return ChatStreamMsg{Err: err}
 			}
 			sessionID = id
 		}
-		resp, modelName, err := m.client.SendMessage(sessionID, text)
+
+		resp, err := m.client.SendMessageRaw(sessionID, text)
 		if err != nil {
-			return ChatResponseMsg{Err: err, SessionID: sessionID}
+			return ChatStreamMsg{Err: err, SessionID: sessionID}
 		}
-		return ChatResponseMsg{Response: resp, SessionID: sessionID, ModelName: modelName}
+
+		go streamSSE(resp, sessionID)
+		return ChatStreamMsg{SessionID: sessionID}
 	}
+}
+
+type streamPart struct {
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+}
+
+type streamInfo struct {
+	ModelID string `json:"modelID"`
+}
+
+type streamResponse struct {
+	Info  streamInfo   `json:"info"`
+	Parts []streamPart `json:"parts"`
+}
+
+func streamSSE(resp *http.Response, sessionID string) {
+	defer resp.Body.Close()
+
+	reader := bufio.NewReader(resp.Body)
+	firstLine, err := reader.ReadString('\n')
+	if err != nil && err != io.EOF {
+		if program != nil {
+			program.Send(ChatStreamMsg{Err: err, SessionID: sessionID, Done: true})
+		}
+		return
+	}
+
+	trimmed := strings.TrimSpace(firstLine)
+
+	var part streamPart
+	if json.Unmarshal([]byte(trimmed), &part) == nil && part.Type != "" {
+		streamNDJSON(trimmed, reader, sessionID)
+	} else {
+		rest, err := io.ReadAll(reader)
+		if err != nil {
+			if program != nil {
+				program.Send(ChatStreamMsg{Err: err, SessionID: sessionID, Done: true})
+			}
+			return
+		}
+		streamSingleJSON(trimmed+string(rest), sessionID)
+	}
+}
+
+func streamNDJSON(firstLine string, reader *bufio.Reader, sessionID string) {
+	var fullText string
+	var modelName string
+
+	processLine := func(line string) {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			return
+		}
+
+		var part streamPart
+		if err := json.Unmarshal([]byte(line), &part); err != nil || part.Type == "" {
+			var resp streamResponse
+			if err := json.Unmarshal([]byte(line), &resp); err == nil && resp.Info.ModelID != "" {
+				modelName = resp.Info.ModelID
+				for _, p := range resp.Parts {
+					sendPart(p, &fullText, modelName, sessionID)
+				}
+			}
+			return
+		}
+
+		sendPart(part, &fullText, modelName, sessionID)
+	}
+
+	processLine(firstLine)
+
+	scanner := bufio.NewScanner(reader)
+	for scanner.Scan() {
+		processLine(scanner.Text())
+	}
+
+	if err := scanner.Err(); err != nil {
+		if program != nil {
+			program.Send(ChatStreamMsg{Err: err, SessionID: sessionID, Done: true})
+		}
+		return
+	}
+
+	if program != nil {
+		program.Send(ChatStreamMsg{
+			Text:      "",
+			FullText:  fullText,
+			SessionID: sessionID,
+			Done:      true,
+			ModelName: modelName,
+		})
+	}
+}
+
+func streamSingleJSON(body string, sessionID string) {
+	var msg streamResponse
+	if err := json.Unmarshal([]byte(body), &msg); err != nil {
+		if program != nil {
+			program.Send(ChatStreamMsg{Err: err, SessionID: sessionID, Done: true})
+		}
+		return
+	}
+
+	var fullText string
+	modelName := msg.Info.ModelID
+
+	for _, p := range msg.Parts {
+		sendPart(p, &fullText, modelName, sessionID)
+	}
+
+	if program != nil {
+		program.Send(ChatStreamMsg{
+			Text:      "",
+			FullText:  fullText,
+			SessionID: sessionID,
+			Done:      true,
+			ModelName: modelName,
+		})
+	}
+}
+
+func sendPart(p streamPart, fullText *string, modelName string, sessionID string) {
+	if p.Type == "text" {
+		*fullText += p.Text
+		if program != nil {
+			program.Send(ChatStreamMsg{
+				Text:      p.Text,
+				FullText:  *fullText,
+				SessionID: sessionID,
+				Done:      false,
+			})
+		}
+	}
+
 }
 
 func (m Model) checkHealth() tea.Cmd {
@@ -71,31 +215,27 @@ func (m Model) fetchSessionUsage() tea.Cmd {
 		}
 		tokens := 0
 		limit := 0
-		model := ""
-		if v, ok := s["model"]; ok {
-			model, _ = v.(string)
-		}
-		if u, ok := s["usage"]; ok {
-			if usage, ok := u.(map[string]interface{}); ok {
-				for _, key := range []string{"tokens_used", "total_tokens", "input_tokens"} {
-					if t, ok := usage[key]; ok {
-						if f, ok := t.(float64); ok {
-							tokens = int(f)
-							break
-						}
-					}
-				}
-				for _, key := range []string{"context_limit", "max_context", "context_window", "max_tokens"} {
-					if l, ok := usage[key]; ok {
-						if f, ok := l.(float64); ok {
-							limit = int(f)
-							break
+		if t, ok := s["tokens"]; ok {
+			if tokensMap, ok := t.(map[string]interface{}); ok {
+				for _, key := range []string{"input", "output"} {
+					if v, ok := tokensMap[key]; ok {
+						if f, ok := v.(float64); ok {
+							tokens += int(f)
 						}
 					}
 				}
 			}
 		}
-		return SessionUsageMsg{TokensUsed: tokens, ContextLimit: limit, ModelName: model}
+		if l, ok := s["limit"]; ok {
+			if limitMap, ok := l.(map[string]interface{}); ok {
+				if ctx, ok := limitMap["context"]; ok {
+					if f, ok := ctx.(float64); ok {
+						limit = int(f)
+					}
+				}
+			}
+		}
+		return SessionUsageMsg{TokensUsed: tokens, ContextLimit: limit}
 	}
 }
 
@@ -151,5 +291,86 @@ func (m Model) handleCommand(input string) tea.Cmd {
 
 	default:
 		return m.addAssistantMsg("Unknown command: " + parts[0] + "\nAvailable: /sessions, /load <n>, /session new")
+	}
+}
+
+func (m Model) startSSEListener() tea.Cmd {
+	return func() tea.Msg {
+		api.DebugSSE("startSSEListener: started")
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		resp, err := m.client.SubscribeGlobalEvents(ctx)
+		if err != nil {
+			api.DebugSSE("startSSEListener: SubscribeGlobalEvents error: %v", err)
+			return ControlRequestMsg{Err: err}
+		}
+		defer resp.Body.Close()
+		api.DebugSSE("startSSEListener: connected, reading events")
+
+		reader := bufio.NewReader(resp.Body)
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				api.DebugSSE("startSSEListener: read error: %v", err)
+				return nil
+			}
+			line = strings.TrimSpace(line)
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+			data := strings.TrimPrefix(line, "data: ")
+			api.DebugSSE("startSSEListener: data=%s", data)
+
+			var msg api.SSEMessage
+			if err := json.Unmarshal([]byte(data), &msg); err != nil {
+				api.DebugSSE("startSSEListener: sse unmarshal error: %v", err)
+				continue
+			}
+			if msg.Payload.Type != "question.asked" {
+				continue
+			}
+			api.DebugSSE("startSSEListener: got question.asked event")
+
+			var qp api.QuestionProperties
+			if err := json.Unmarshal(msg.Payload.Properties, &qp); err != nil {
+				api.DebugSSE("startSSEListener: properties unmarshal error: %v", err)
+				continue
+			}
+			if len(qp.Questions) == 0 {
+				continue
+			}
+
+			cr := &api.ControlRequest{
+				ID:   qp.ID,
+				Type: "question.asked",
+				Data: api.ControlRequestData{
+					Questions: qp.Questions,
+				},
+			}
+			api.DebugSSE("startSSEListener: sending ControlRequestMsg id=%s", cr.ID)
+			if program != nil {
+				program.Send(ControlRequestMsg{Request: cr})
+			} else {
+				api.DebugSSE("startSSEListener: program is nil!")
+			}
+		}
+	}
+}
+
+func (m Model) sendControlResponse() tea.Cmd {
+	return func() tea.Msg {
+		var answers [][]string
+		for i := range m.pendingControl.Data.Questions {
+			a := ""
+			if i < len(m.questionAnswers) {
+				a = m.questionAnswers[i]
+			}
+			answers = append(answers, []string{a})
+		}
+		err := m.client.ReplyToQuestion(m.pendingControl.ID, answers)
+		if err != nil {
+			return ControlRequestMsg{Err: err}
+		}
+		return ControlRequestMsg{}
 	}
 }

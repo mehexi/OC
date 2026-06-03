@@ -24,9 +24,11 @@ func ChatView(m Model) tea.View {
 func RenderChatBubble(msg ChatMessage, m Model) string {
 	color := cyanColor
 	prefix := "You >"
-	if msg.Role == "assistant" {
+	switch msg.Role {
+	case "assistant":
 		color = whiteColor
 		prefix = "oc >"
+
 	}
 
 	prefixRendered := lipgloss.NewStyle().Foreground(color).Render(prefix)

@@ -9,9 +9,9 @@ import (
 )
 
 func main() {
-	p := tea.NewProgram(
-		tui.IntialModel(),
-	)
+	m := tui.IntialModel()
+	p := tea.NewProgram(m)
+	tui.SetProgram(p)
 
 	if _, err := p.Run(); err != nil {
 		fmt.Println("error:", err)

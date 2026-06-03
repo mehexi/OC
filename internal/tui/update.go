@@ -14,6 +14,8 @@ import (
 func (m Model) onServerStarted(msg ServerStartedMsg) (Model, tea.Cmd) {
 	m.serverAddr = msg.Address
 	m.client = api.New(msg.Address)
+	m.client.Debug = true
+	m.client.LogFile = "/tmp/oc-api.log"
 	return m, m.checkHealth()
 }
 
@@ -65,10 +67,12 @@ func (m Model) onProvidersInfo(msg ProvidersInfoMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// onPath stores the current working directory path.
+// onPath stores the current working directory path and starts SSE listener.
 func (m Model) onPath(msg PathMsg) (Model, tea.Cmd) {
 	if msg.Err == nil {
 		m.currentPath = msg.Path
+		m.client.Directory = msg.Path
+		return m, m.startSSEListener()
 	}
 	return m, nil
 }
@@ -81,6 +85,140 @@ func (m Model) onSessionUsage(msg SessionUsageMsg) (Model, tea.Cmd) {
 		if msg.ModelName != "" {
 			m.modelName = msg.ModelName
 		}
+	}
+	return m, nil
+}
+
+// onControlRequest handles incoming questions from the question tool.
+func (m Model) onControlRequest(msg ControlRequestMsg) (Model, tea.Cmd) {
+	if msg.Err != nil {
+		m.loading = false
+		m.awaitingResponse = false
+		m.pendingControl = nil
+		m.currentQuestionIdx = 0
+		m.questionAnswers = nil
+		m.inputText.Placeholder = "Ask anything ..."
+		m.messages = append(m.messages, ChatMessage{Role: "assistant", Content: "Control request error: " + msg.Err.Error()})
+		return m.refreshMessages(), nil
+	}
+	if msg.Request == nil {
+		m.loading = false
+		m.inputText.Placeholder = "Ask anything ..."
+		if m.awaitingResponse {
+			return m, nil
+		}
+		m.awaitingResponse = false
+		if m.pendingControl != nil {
+			var sb strings.Builder
+			sb.WriteString("Answers:\n")
+			for i, q := range m.pendingControl.Data.Questions {
+				a := ""
+				if i < len(m.questionAnswers) {
+					a = m.questionAnswers[i]
+				}
+				sb.WriteString(fmt.Sprintf("- %s: %s\n", q.Header, a))
+			}
+			m.pendingControl = nil
+			m.currentQuestionIdx = 0
+			m.questionAnswers = nil
+			m.messages = append(m.messages, ChatMessage{Role: "user", Content: strings.TrimSpace(sb.String())})
+			m = m.refreshMessages()
+			m.inputText.SetValue("")
+			if m.streaming {
+				return m, nil
+			}
+			m.loading = true
+			return m, m.sendChat(strings.TrimSpace(sb.String()))
+		}
+		if m.streaming {
+			return m, nil
+		}
+		return m, nil
+	}
+
+	if m.pendingControl != nil {
+		return m, nil
+	}
+	m.pendingControl = msg.Request
+	m.currentQuestionIdx = 0
+	m.questionAnswers = nil
+	m.awaitingResponse = true
+	m.loading = false
+	m.mode = modeInsert
+	m.inputText.Focus()
+	m.inputText.Placeholder = "Answer..."
+	m.inputText.SetValue("")
+
+	content := formatQuestion(msg.Request.Data.Questions[0])
+	m.messages = append(m.messages, ChatMessage{Role: "assistant", Content: content})
+	return m.refreshMessages(), nil
+}
+
+func formatQuestion(q api.QuestionData) string {
+	var b strings.Builder
+	b.WriteString("── " + q.Header + " ──\n\n")
+	b.WriteString(q.Question + "\n\n")
+	for i, opt := range q.Options {
+		b.WriteString(fmt.Sprintf("  %d. %s", i+1, opt.Label))
+		if opt.Description != "" {
+			b.WriteString("  (" + opt.Description + ")")
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("\nType your answer and press Enter.")
+	return b.String()
+}
+
+// onStreamMsg handles SSE streaming chunks from the AI response.
+func (m Model) onStreamMsg(msg ChatStreamMsg) (Model, tea.Cmd) {
+	if msg.Err != nil {
+		m.loading = false
+		m.streaming = false
+		m.messages = append(m.messages, ChatMessage{Role: "assistant", Content: "Error: " + msg.Err.Error()})
+		return m.refreshMessages(), nil
+	}
+
+	// First message carries the session ID — persist user message
+	if msg.SessionID != "" && m.sessionId == "" {
+		m.sessionId = msg.SessionID
+		if len(m.messages) > 0 {
+			history.AppendMessage(m.sessionId, "user", m.messages[len(m.messages)-1].Content)
+		}
+	}
+
+	if msg.Done {
+		m.streaming = false
+		if msg.ModelName != "" {
+			m.modelName = msg.ModelName
+		}
+		// Persist final assistant message
+		for i := len(m.messages) - 1; i >= 0; i-- {
+			if m.messages[i].Role == "assistant" {
+				history.AppendMessage(m.sessionId, "assistant", m.messages[i].Content)
+				break
+			}
+		}
+		return m.refreshMessages(), m.fetchSessionUsage()
+	}
+
+	m.loading = false
+	firstStream := !m.streaming
+	m.streaming = true
+
+	if msg.Text == "" {
+		return m, nil
+	}
+
+	if len(m.messages) > 0 && m.messages[len(m.messages)-1].Role == "assistant" {
+		m.messages[len(m.messages)-1].Content += msg.Text
+	} else {
+		m.messages = append(m.messages, ChatMessage{Role: "assistant", Content: msg.Text})
+	}
+
+	m = m.refreshMessages()
+	m.viewPort.GotoBottom()
+	if firstStream {
+		return m, nil
 	}
 	return m, nil
 }
@@ -168,6 +306,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onServerErr(msg)
 	case HealthCheckMsg:
 		return m.onHealthCheck(msg)
+	case ChatStreamMsg:
+		return m.onStreamMsg(msg)
+	case ControlRequestMsg:
+		return m.onControlRequest(msg)
 	case ChatResponseMsg:
 		return m.onChatResponse(msg)
 	case LoadSessionMsg:

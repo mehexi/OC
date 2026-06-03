@@ -13,7 +13,7 @@ func modeTag(m Model) string {
 
 	switch m.mode {
 	case modeInsert:
-		label = "  INSERT  "
+		label = "  INSERT  iiii"
 		fg = cyanColor
 	case modeVisual:
 		label = "  VISUAL  "

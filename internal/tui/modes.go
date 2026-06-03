@@ -5,8 +5,8 @@ import (
 	"oc/internal/server"
 	"strings"
 
-	"github.com/atotto/clipboard"
 	tea "charm.land/bubbletea/v2"
+	"github.com/atotto/clipboard"
 )
 
 func (m Model) onNormalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
@@ -14,6 +14,10 @@ func (m Model) onNormalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	case "i":
 		m.mode = modeInsert
 		m.inputText.Focus()
+		s := m.inputText.Styles()
+		s.Cursor.Color = cyanColor
+		s.Cursor.Blink = false
+		m.inputText.SetStyles(s)
 		return m, nil
 
 	case "j":
@@ -60,7 +64,13 @@ func (m Model) onNormalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	case "enter":
 		m.awaitingGG = false
 		input := m.inputText.Value()
-		if input != "" && !m.loading {
+		if input == "" {
+			return m, nil
+		}
+		if m.awaitingResponse {
+			return m.handleQuestionAnswer(input)
+		}
+		if !m.loading && !m.streaming {
 			if strings.HasPrefix(input, "/") {
 				m.inputText.SetValue("")
 				parts := strings.Fields(input)
@@ -105,7 +115,13 @@ func (m Model) onInsertKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 
 	case "enter":
 		input := m.inputText.Value()
-		if input != "" && !m.loading {
+		if input == "" {
+			return m, nil
+		}
+		if m.awaitingResponse {
+			return m.handleQuestionAnswer(input)
+		}
+		if !m.loading && !m.streaming {
 			if strings.HasPrefix(input, "/") {
 				m.inputText.SetValue("")
 				parts := strings.Fields(input)
@@ -140,6 +156,27 @@ func (m Model) onInsertKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		m.viewPort, vpCmd = m.viewPort.Update(msg)
 		return m, tea.Batch(cmd, vpCmd)
 	}
+}
+
+func (m Model) handleQuestionAnswer(input string) (Model, tea.Cmd) {
+	m.questionAnswers = append(m.questionAnswers, input)
+	m.messages = append(m.messages, ChatMessage{Role: "user", Content: input})
+	m = m.refreshMessages()
+	m.inputText.SetValue("")
+
+	if m.currentQuestionIdx+1 < len(m.pendingControl.Data.Questions) {
+		m.currentQuestionIdx++
+		content := formatQuestion(m.pendingControl.Data.Questions[m.currentQuestionIdx])
+		m.messages = append(m.messages, ChatMessage{Role: "assistant", Content: content})
+		m.mode = modeInsert
+		m.inputText.Focus()
+		m.loading = false
+		return m.refreshMessages(), nil
+	}
+
+	m.awaitingResponse = false
+	m.loading = true
+	return m, m.sendControlResponse()
 }
 
 func (m Model) onVisualKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
