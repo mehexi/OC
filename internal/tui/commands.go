@@ -259,8 +259,26 @@ func (m Model) handleCommand(input string) tea.Cmd {
 	}
 
 	switch parts[0] {
+	case "/help":
+		return m.addAssistantMsg(
+			"Commands:\n" +
+				"  /help          Show this help\n" +
+				"  /sessions      List and load past sessions\n" +
+				"  /session new   Start a fresh session\n" +
+				"  /clear         Clear chat messages\n" +
+				"  /retry         Re-send last user message\n" +
+				"  /load <n>      Load session by number\n" +
+				"  /tokens        Show token usage\n" +
+				"  /exit          Quit the app",
+		)
+
 	case "/sessions":
 		return m.showSessionListCmd()
+
+	case "/tokens":
+		usage := fmt.Sprintf("Model: %s  |  Tokens: %d / %d  |  Remaining: %d",
+			m.modelName, m.tokensUsed, m.contextLimit, m.contextLimit-m.tokensUsed)
+		return m.addAssistantMsg(usage)
 
 	case "/exit":
 		server.KillServer()
@@ -287,7 +305,7 @@ func (m Model) handleCommand(input string) tea.Cmd {
 		}
 
 	default:
-		return m.addAssistantMsg("Unknown command: " + parts[0] + "\nAvailable: /sessions, /load <n>, /session new")
+		return m.addAssistantMsg("Unknown: " + parts[0] + "\nTry /help for available commands.")
 	}
 }
 
