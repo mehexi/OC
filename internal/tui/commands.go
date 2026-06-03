@@ -245,6 +245,12 @@ func (m Model) addAssistantMsg(content string) tea.Cmd {
 	}
 }
 
+func (m Model) showSessionListCmd() tea.Cmd {
+	return func() tea.Msg {
+		return ShowSessionListMsg{}
+	}
+}
+
 func (m Model) handleCommand(input string) tea.Cmd {
 	parts := strings.Fields(input)
 	if len(parts) == 0 {
@@ -253,21 +259,7 @@ func (m Model) handleCommand(input string) tea.Cmd {
 
 	switch parts[0] {
 	case "/sessions":
-		sessions, err := history.ListSessions()
-		if err != nil {
-			return m.addAssistantMsg("Error listing sessions: " + err.Error())
-		}
-		if len(sessions) == 0 {
-			return m.addAssistantMsg("No past sessions.")
-		}
-		var b strings.Builder
-		b.WriteString(fmt.Sprintf("─── %d Past Sessions ───\n\n", len(sessions)))
-		for i, s := range sessions {
-			t := s.CreatedAt.Format("Jan 02 15:04")
-			b.WriteString(fmt.Sprintf("  %d. %s\n     %s · %d msgs\n\n", i+1, s.Title, t, s.Count))
-		}
-		b.WriteString("Load one with  /load <number>")
-		return m.addAssistantMsg(b.String())
+		return m.showSessionListCmd()
 
 	case "/load":
 		if len(parts) < 2 {
@@ -296,22 +288,18 @@ func (m Model) handleCommand(input string) tea.Cmd {
 
 func (m Model) startSSEListener() tea.Cmd {
 	return func() tea.Msg {
-		api.DebugSSE("startSSEListener: started")
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		resp, err := m.client.SubscribeGlobalEvents(ctx)
 		if err != nil {
-			api.DebugSSE("startSSEListener: SubscribeGlobalEvents error: %v", err)
 			return ControlRequestMsg{Err: err}
 		}
 		defer resp.Body.Close()
-		api.DebugSSE("startSSEListener: connected, reading events")
 
 		reader := bufio.NewReader(resp.Body)
 		for {
 			line, err := reader.ReadString('\n')
 			if err != nil {
-				api.DebugSSE("startSSEListener: read error: %v", err)
 				return nil
 			}
 			line = strings.TrimSpace(line)
@@ -319,21 +307,17 @@ func (m Model) startSSEListener() tea.Cmd {
 				continue
 			}
 			data := strings.TrimPrefix(line, "data: ")
-			api.DebugSSE("startSSEListener: data=%s", data)
 
 			var msg api.SSEMessage
 			if err := json.Unmarshal([]byte(data), &msg); err != nil {
-				api.DebugSSE("startSSEListener: sse unmarshal error: %v", err)
 				continue
 			}
 			if msg.Payload.Type != "question.asked" {
 				continue
 			}
-			api.DebugSSE("startSSEListener: got question.asked event")
 
 			var qp api.QuestionProperties
 			if err := json.Unmarshal(msg.Payload.Properties, &qp); err != nil {
-				api.DebugSSE("startSSEListener: properties unmarshal error: %v", err)
 				continue
 			}
 			if len(qp.Questions) == 0 {
@@ -347,11 +331,8 @@ func (m Model) startSSEListener() tea.Cmd {
 					Questions: qp.Questions,
 				},
 			}
-			api.DebugSSE("startSSEListener: sending ControlRequestMsg id=%s", cr.ID)
 			if program != nil {
 				program.Send(ControlRequestMsg{Request: cr})
-			} else {
-				api.DebugSSE("startSSEListener: program is nil!")
 			}
 		}
 	}

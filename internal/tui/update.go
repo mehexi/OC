@@ -14,8 +14,6 @@ import (
 func (m Model) onServerStarted(msg ServerStartedMsg) (Model, tea.Cmd) {
 	m.serverAddr = msg.Address
 	m.client = api.New(msg.Address)
-	m.client.Debug = true
-	m.client.LogFile = "/tmp/oc-api.log"
 	return m, m.checkHealth()
 }
 
@@ -266,6 +264,10 @@ func (m Model) onKeyPress(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m.onVisualKey(msg)
 	case modeQus:
 		return m.onQusKey(msg)
+	case modeSession:
+		return m.onSessionKey(msg)
+	case modeCmd:
+		return m.onCmdKey(msg)
 	default:
 		return m.onInsertKey(msg)
 	}
@@ -307,6 +309,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onSessionUsage(msg)
 	case tea.WindowSizeMsg:
 		return m.onWindowSize(msg)
+	case ShowSessionListMsg:
+		return m.showSessionList(), nil
 	case tea.KeyPressMsg:
 		return m.onKeyPress(msg)
 	}

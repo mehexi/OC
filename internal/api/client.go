@@ -13,24 +13,6 @@ import (
 	"time"
 )
 
-var sseLog *os.File
-
-func initSSELog() {
-	f, err := os.OpenFile("/tmp/oc-sse.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err == nil {
-		sseLog = f
-	}
-}
-
-func DebugSSE(format string, args ...interface{}) {
-	if sseLog == nil {
-		initSSELog()
-	}
-	if sseLog != nil {
-		fmt.Fprintf(sseLog, format+"\n", args...)
-	}
-}
-
 type Client struct {
 	baseURL    string
 	httpClient *http.Client
@@ -143,10 +125,8 @@ type ControlRequestData struct {
 }
 
 func (c *Client) SubscribeGlobalEvents(ctx context.Context) (*http.Response, error) {
-	DebugSSE("SubscribeGlobalEvents: connecting to %s/global/event (dir=%q)", c.baseURL, c.Directory)
 	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/global/event", nil)
 	if err != nil {
-		DebugSSE("SubscribeGlobalEvents: new request error: %v", err)
 		return nil, err
 	}
 	req.Header.Set("Accept", "text/event-stream")
@@ -161,10 +141,8 @@ func (c *Client) SubscribeGlobalEvents(ctx context.Context) (*http.Response, err
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		DebugSSE("SubscribeGlobalEvents: Do error: %v", err)
 		return nil, err
 	}
-	DebugSSE("SubscribeGlobalEvents: status=%d", resp.StatusCode)
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
 		return nil, fmt.Errorf("subscribe events: unexpected status %d", resp.StatusCode)

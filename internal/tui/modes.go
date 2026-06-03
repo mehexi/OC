@@ -2,12 +2,11 @@ package tui
 
 import (
 	"fmt"
+	"oc/internal/history"
 	"oc/internal/server"
 	"strings"
 
-	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/atotto/clipboard"
 )
 
@@ -59,9 +58,8 @@ func (m Model) onNormalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		m.awaitingGG = false
 		m.inputText.SetValue("/")
 		m.inputText.SetCursor(len("/"))
-		m.mode = modeInsert
 		m.inputText.Focus()
-		return m, nil
+		return m.showCmdList(), nil
 
 	case "enter":
 		m.awaitingGG = false
@@ -82,6 +80,9 @@ func (m Model) onNormalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 				return m, m.handleCommand(input)
 			}
 			m.messages = append(m.messages, ChatMessage{Role: "user", Content: input})
+			if m.sessionId != "" {
+				history.AppendMessage(m.sessionId, "user", input)
+			}
 			m = m.refreshMessages()
 			m.inputText.SetValue("")
 			m.loading = true
@@ -127,9 +128,15 @@ func (m Model) onInsertKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 					m = m.refreshMessages()
 					return m, m.addAssistantMsg("Started a new session.")
 				}
+				if input == "/" {
+					return m.showCmdList(), nil
+				}
 				return m, m.handleCommand(input)
 			}
 			m.messages = append(m.messages, ChatMessage{Role: "user", Content: input})
+			if m.sessionId != "" {
+				history.AppendMessage(m.sessionId, "user", input)
+			}
 			m = m.refreshMessages()
 			m.inputText.SetValue("")
 			m.loading = true
@@ -150,6 +157,9 @@ func (m Model) onInsertKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		m.inputText, cmd = m.inputText.Update(msg)
 		var vpCmd tea.Cmd
 		m.viewPort, vpCmd = m.viewPort.Update(msg)
+		if strings.HasPrefix(m.inputText.Value(), "/") {
+			return m.showCmdList(), tea.Batch(cmd, vpCmd)
+		}
 		return m, tea.Batch(cmd, vpCmd)
 	}
 }
@@ -204,36 +214,18 @@ func (m Model) onVisualKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 
 func (m Model) showQusList() Model {
 	q := m.pendingControl.Data.Questions[m.currentQuestionIdx]
-	items := make([]list.Item, len(q.Options))
+	m.qusItems = make([]qusItem, len(q.Options))
 	for i, opt := range q.Options {
-		items[i] = qusItem{label: opt.Label, desc: opt.Description}
+		m.qusItems[i] = qusItem{label: opt.Label, desc: opt.Description}
 	}
-
-	del := list.NewDefaultDelegate()
-	del.SetHeight(1)
-	del.SetSpacing(0)
-	del.ShowDescription = false
-	del.Styles.NormalTitle = lipgloss.NewStyle().Foreground(whiteColor).Padding(0, 2, 0, 2)
-	del.Styles.SelectedTitle = lipgloss.NewStyle().Foreground(cyanColor).Bold(true).Padding(0, 2, 0, 2)
-	del.Styles.DimmedTitle = lipgloss.NewStyle().Foreground(mutedColor).Padding(0, 2, 0, 2)
-
-	m.qusList.SetDelegate(del)
-	m.qusList.SetItems(items)
-	m.qusList.Title = q.Header + "  (" + q.Question + ")"
-	m.qusList.SetFilteringEnabled(false)
-	m.qusList.SetShowTitle(true)
-	m.qusList.SetShowPagination(false)
-	m.qusList.SetShowHelp(false)
-	m.qusList.SetShowStatusBar(false)
-	m.qusList.KeyMap.Quit.SetEnabled(false)
-	m.qusList.Select(0)
-	m.qusList.Styles.Title = lipgloss.NewStyle().Foreground(cyanColor).Bold(true)
-	m.qusList.Styles.TitleBar = lipgloss.NewStyle().Padding(0, 0, 0, 2).Border(lipgloss.NormalBorder()).BorderBottom(true).BorderLeft(false).BorderRight(false).BorderTop(false).BorderForeground(cyanColor)
+	m.qusCursor = 0
 
 	const compactHeaderHeight = 3
 	available := m.termHeight - compactHeaderHeight - inputBoxHeight
-	qusHeight := min(len(items)+2, available-3)
-	m.qusList.SetSize(m.width, qusHeight)
+	qusHeight := 2 + len(m.qusItems)
+	if qusHeight > available-3 {
+		qusHeight = available - 3
+	}
 	m.qusHeight = qusHeight
 	m.viewPort.SetHeight(available - qusHeight)
 
@@ -243,8 +235,10 @@ func (m Model) showQusList() Model {
 }
 
 func (m Model) handleQusAnswer() (Model, tea.Cmd) {
-	selected := m.qusList.SelectedItem().(qusItem)
-	answer := selected.label
+	if m.qusCursor >= len(m.qusItems) {
+		return m, nil
+	}
+	answer := m.qusItems[m.qusCursor].label
 
 	m.questionAnswers = append(m.questionAnswers, answer)
 	m.messages = append(m.messages, ChatMessage{Role: "user", Content: answer})
@@ -256,6 +250,8 @@ func (m Model) handleQusAnswer() (Model, tea.Cmd) {
 	}
 
 	m.awaitingResponse = false
+	m.qusItems = nil
+	m.qusCursor = 0
 	m.mode = modeInsert
 	m.inputText.Focus()
 	m.inputText.Placeholder = "Ask anything ..."
@@ -270,6 +266,8 @@ func (m Model) handleQusCancel() (Model, tea.Cmd) {
 	m.currentQuestionIdx = 0
 	m.questionAnswers = nil
 	m.awaitingResponse = false
+	m.qusItems = nil
+	m.qusCursor = 0
 	m.mode = modeInsert
 	m.inputText.Focus()
 	m.inputText.Placeholder = "Ask anything ..."
@@ -282,22 +280,227 @@ func (m Model) handleQusCancel() (Model, tea.Cmd) {
 func (m Model) onQusKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch msg.String() {
 	case "j", "down":
-		m.qusList, _ = m.qusList.Update(msg)
+		if m.qusCursor < len(m.qusItems)-1 {
+			m.qusCursor++
+		}
 		return m, nil
 	case "k", "up":
-		m.qusList, _ = m.qusList.Update(msg)
+		if m.qusCursor > 0 {
+			m.qusCursor--
+		}
 		return m, nil
 	case "enter":
-		selected := m.qusList.SelectedItem()
-		if selected == nil {
+		if len(m.qusItems) == 0 {
 			return m, nil
 		}
 		return m.handleQusAnswer()
 	case "esc", "ctrl+c":
 		return m.handleQusCancel()
 	default:
-		var cmd tea.Cmd
-		m.qusList, cmd = m.qusList.Update(msg)
-		return m, cmd
+		return m, nil
 	}
+}
+
+func (m Model) showSessionList() Model {
+	sessions, err := history.ListSessions()
+	if err != nil || len(sessions) == 0 {
+		m.messages = append(m.messages, ChatMessage{Role: "assistant", Content: "No past sessions."})
+		m = m.refreshMessages()
+		return m
+	}
+	m.sessions = sessions
+	m.sessionPage = 0
+	m.sessionCursor = 0
+
+	const compactHeaderHeight = 3
+	itemsPerPage := 5
+	total := len(sessions)
+	totalPages := (total + itemsPerPage - 1) / itemsPerPage
+	sessionLines := 2 + itemsPerPage
+	if totalPages > 1 {
+		sessionLines += 2
+	}
+	available := m.termHeight - compactHeaderHeight - inputBoxHeight
+	m.viewPort.SetHeight(available - sessionLines)
+
+	m.mode = modeSession
+	m.inputText.Blur()
+	return m
+}
+
+func (m Model) onSessionKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
+	itemsPerPage := 5
+	total := len(m.sessions)
+	totalPages := (total + itemsPerPage - 1) / itemsPerPage
+	itemsOnPage := itemsPerPage
+	start := m.sessionPage * itemsPerPage
+	if end := start + itemsPerPage; end > total {
+		itemsOnPage = total - start
+	}
+
+	switch msg.String() {
+	case "j", "down":
+		if m.sessionCursor < itemsOnPage-1 {
+			m.sessionCursor++
+		} else if m.sessionPage < totalPages-1 {
+			m.sessionPage++
+			m.sessionCursor = 0
+		}
+		return m, nil
+	case "k", "up":
+		if m.sessionCursor > 0 {
+			m.sessionCursor--
+		} else if m.sessionPage > 0 {
+			m.sessionPage--
+			itemsOnPrev := itemsPerPage
+			if end := m.sessionPage*itemsPerPage + itemsPerPage; end > total {
+				itemsOnPrev = total - m.sessionPage*itemsPerPage
+			}
+			m.sessionCursor = itemsOnPrev - 1
+		}
+		return m, nil
+	case "enter":
+		idx := m.sessionPage*itemsPerPage + m.sessionCursor
+		if idx >= total {
+			return m, nil
+		}
+		selected := m.sessions[idx]
+		m.mode = modeInsert
+		m.inputText.Focus()
+		m.inputText.Placeholder = "Ask anything ..."
+		m.viewPort.SetHeight(m.termHeight - splashHeight - inputBoxHeight)
+		return m, func() tea.Msg {
+			s, err := history.LoadSession(selected.ID)
+			if err != nil {
+				return ChatResponseMsg{Err: fmt.Errorf("load session: %w", err)}
+			}
+			return LoadSessionMsg{Session: s}
+		}
+	case "esc", "ctrl+c":
+		return m.handleSessionCancel()
+	}
+	return m, nil
+}
+
+func (m Model) handleSessionCancel() (Model, tea.Cmd) {
+	m.mode = modeInsert
+	m.inputText.Focus()
+	m.inputText.Placeholder = "Ask anything ..."
+	m.viewPort.SetHeight(m.termHeight - splashHeight - inputBoxHeight)
+	return m, nil
+}
+
+var cmdList = []cmdItem{
+	{Name: "/sessions", Category: "history", Description: "List and load past sessions"},
+	{Name: "/session new", Category: "history", Description: "Start a fresh session"},
+	{Name: "/load <n>", Category: "history", Description: "Load session by number"},
+}
+
+func (m Model) showCmdList() Model {
+	m.cmdPage = 0
+	m.cmdCursor = 0
+
+	const compactHeaderHeight = 3
+	const itemsPerPage = 5
+	total := len(cmdList)
+	totalPages := (total + itemsPerPage - 1) / itemsPerPage
+	cmdLines := 2 + itemsPerPage
+	if totalPages > 1 {
+		cmdLines += 2
+	}
+	available := m.termHeight - compactHeaderHeight - inputBoxHeight
+	m.viewPort.SetHeight(available - cmdLines)
+
+	m.mode = modeCmd
+	return m
+}
+
+func (m Model) onCmdKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
+	const itemsPerPage = 5
+	total := len(cmdList)
+	totalPages := (total + itemsPerPage - 1) / itemsPerPage
+	itemsOnPage := itemsPerPage
+	start := m.cmdPage * itemsPerPage
+	if end := start + itemsPerPage; end > total {
+		itemsOnPage = total - start
+	}
+
+	switch msg.String() {
+	case "j", "down":
+		if m.cmdCursor < itemsOnPage-1 {
+			m.cmdCursor++
+		} else if m.cmdPage < totalPages-1 {
+			m.cmdPage++
+			m.cmdCursor = 0
+		}
+		return m, nil
+	case "k", "up":
+		if m.cmdCursor > 0 {
+			m.cmdCursor--
+		} else if m.cmdPage > 0 {
+			m.cmdPage--
+			itemsOnPrev := itemsPerPage
+			if end := m.cmdPage*itemsPerPage + itemsPerPage; end > total {
+				itemsOnPrev = total - m.cmdPage*itemsPerPage
+			}
+			m.cmdCursor = itemsOnPrev - 1
+		}
+		return m, nil
+	case "enter":
+		input := m.inputText.Value()
+		if input != "/" && input != "" {
+			return m.executeCommand(input)
+		}
+		idx := m.cmdPage*itemsPerPage + m.cmdCursor
+		if idx >= total {
+			return m, nil
+		}
+		return m.handleCmdSelect(cmdList[idx].Name)
+	case "esc", "ctrl+c":
+		return m.handleCmdCancel()
+	default:
+		var cmd tea.Cmd
+		m.inputText, cmd = m.inputText.Update(msg)
+		var vpCmd tea.Cmd
+		m.viewPort, vpCmd = m.viewPort.Update(msg)
+		if !strings.HasPrefix(m.inputText.Value(), "/") {
+			return m.handleCmdCancel()
+		}
+		return m, tea.Batch(cmd, vpCmd)
+	}
+}
+
+func (m Model) executeCommand(input string) (Model, tea.Cmd) {
+	m.mode = modeInsert
+	m.inputText.Focus()
+	m.inputText.Placeholder = "Ask anything ..."
+	m.inputText.SetValue("")
+	m.viewPort.SetHeight(m.termHeight - splashHeight - inputBoxHeight)
+	parts := strings.Fields(input)
+	if len(parts) == 2 && parts[0] == "/session" && parts[1] == "new" {
+		m.sessionId = ""
+		m.messages = nil
+		m = m.refreshMessages()
+		return m, m.addAssistantMsg("Started a new session.")
+	}
+	return m, m.handleCommand(input)
+}
+
+func (m Model) handleCmdSelect(cmd string) (Model, tea.Cmd) {
+	m.mode = modeInsert
+	m.inputText.Focus()
+	m.inputText.Placeholder = "Ask anything ..."
+	m.inputText.SetValue(cmd)
+	m.inputText.SetCursor(len(cmd))
+	m.viewPort.SetHeight(m.termHeight - splashHeight - inputBoxHeight)
+	return m, nil
+}
+
+func (m Model) handleCmdCancel() (Model, tea.Cmd) {
+	m.mode = modeInsert
+	m.inputText.Focus()
+	m.inputText.Placeholder = "Ask anything ..."
+	m.inputText.SetValue("")
+	m.viewPort.SetHeight(m.termHeight - splashHeight - inputBoxHeight)
+	return m, nil
 }
