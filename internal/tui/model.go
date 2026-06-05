@@ -38,8 +38,9 @@ type qusItem struct {
 }
 
 type ChatMessage struct {
-	Role    string
-	Content string
+	Role      string
+	Content   string
+	Reasoning string
 }
 
 type Model struct {
@@ -104,12 +105,14 @@ type ChatResponseMsg struct {
 }
 
 type ChatStreamMsg struct {
-	Text      string
-	SessionID string
-	FullText  string
-	Done      bool
-	ModelName string
-	Err       error
+	Text           string
+	Reasoning      string
+	SessionID      string
+	FullText       string
+	FullReasoning  string
+	Done           bool
+	ModelName      string
+	Err            error
 }
 
 type ControlRequestMsg struct {

@@ -114,6 +114,12 @@ type QuestionProperties struct {
 	Questions []QuestionData `json:"questions"`
 }
 
+type DeltaMsgStream struct {
+	ID        string         `json:"id"`
+	SessionID string         `json:"sessionID"`
+	Questions []QuestionData `json:"questions"`
+}
+
 type PermissionReqInfo struct {
 	ID         string   `json:"id"`
 	SessionID  string   `json:"sessionID"`

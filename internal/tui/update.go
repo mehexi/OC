@@ -166,10 +166,26 @@ func (m Model) onStreamMsg(msg ChatStreamMsg) (Model, tea.Cmd) {
 		}
 	}
 
+	// Ignore SSE events from other sessions
+	if msg.SessionID != "" && m.sessionId != "" && msg.SessionID != m.sessionId {
+		return m, nil
+	}
+
 	if msg.Done {
+		if !m.streaming {
+			return m, nil
+		}
 		m.streaming = false
 		if msg.ModelName != "" {
 			m.modelName = msg.ModelName
+		}
+		if msg.FullReasoning != "" {
+			for i := len(m.messages) - 1; i >= 0; i-- {
+				if m.messages[i].Role == "assistant" {
+					m.messages[i].Reasoning = msg.FullReasoning
+					break
+				}
+			}
 		}
 		// Persist final assistant message
 		for i := len(m.messages) - 1; i >= 0; i-- {
@@ -185,14 +201,18 @@ func (m Model) onStreamMsg(msg ChatStreamMsg) (Model, tea.Cmd) {
 	firstStream := !m.streaming
 	m.streaming = true
 
-	if msg.Text == "" {
-		return m, nil
+	// Ensure an assistant message exists to append to
+	if len(m.messages) == 0 || m.messages[len(m.messages)-1].Role != "assistant" {
+		m.messages = append(m.messages, ChatMessage{Role: "assistant"})
 	}
 
-	if len(m.messages) > 0 && m.messages[len(m.messages)-1].Role == "assistant" {
-		m.messages[len(m.messages)-1].Content += msg.Text
-	} else {
-		m.messages = append(m.messages, ChatMessage{Role: "assistant", Content: msg.Text})
+	last := &m.messages[len(m.messages)-1]
+
+	if msg.Text != "" {
+		last.Content += msg.Text
+	}
+	if msg.Reasoning != "" {
+		last.Reasoning += msg.Reasoning
 	}
 
 	m = m.refreshMessages()

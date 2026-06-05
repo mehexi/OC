@@ -51,26 +51,6 @@ func modeTag(m Model) string {
 }
 
 func RenderSplash(m Model) string {
-	logoIcon := lipgloss.NewStyle().Render(`
-⣡⣴⣶⣶⡀⠄⠄⠙⢿⣿⣿⣿⣿⣿⣴⣿⣿⣿⢃⣤⣄⣀⣥⣿
-⢸⣇⠻⣿⣿⣿⣧⣀⢀⣠⡌⢻⣿⣿⣿⣿⣿⣿⣿⣿⣿⠿⠿⠿⣿⣿
-⢸⣿⣷⣤⣤⣤⣬⣙⣛⢿⣿⣿⣿⣿⣿⣿⡿⣿⣿⡍⠄⠄⢀⣤⣄⠉
-⣖⣿⣿⣿⣿⣿⣿⣿⣿⣿⢿⣿⣿⣿⣿⣿⢇⣿⣿⡷⠶⠶⢿⣿⣿⠇⢀
-⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣽⣿⣿⣿⡇⣿⣿⣿⣿⣿⣿⣷⣶⣥⣴
-⢿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿
-⣦⣌⣛⣻⣿⣿⣧⠙⠛⠛⡭⠅⠒⠦⠭⣭⡻⣿⣿⣿⣿⣿⣿⣿⣿⡿⠃⠄
-⣿⣿⣿⣿⣿⣿⣿⡆⠄⠄⠄⠄⠄⠄⠄⠄⠹⠈⢋⣽⣿⣿⣿⣵⣾
-⣿⣿⣿⣿⣿⣿⣿⣿⠄⣴⣿⣶⣄⠄⣴⣶⠄⢀⣾⣿⣿⣿⣿⣿⣿⠃⠄⠄
-⠈⠻⣿⣿⣿⣿⣿⣿⡄⢻⣿⣿⣿⠄⣿⣿⡀⣾⣿⣿⣿⣿⣛⠛⠁
-⠄⠄⠈⠛⢿⣿⣿⣿⠁⠞⢿⣿⣿⡄⢿⣿⡇⣸⣿⣿⠿⠛⠁⠄
-⠄⠄⠄⠄⠄⠉⠻⣿⣿⣾⣦⡙⠻⣷⣾⣿⠃⠿⠋⠁⠄
-`)
-
-	borderedLogo := lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder()).
-		BorderRight(true).BorderLeft(false).BorderTop(false).BorderBottom(false).
-		Render(logoIcon)
-
 	var infoLines []string
 	if m.healthStatus != nil && m.healthStatus.Healthy {
 		infoLines = append(infoLines, lipgloss.NewStyle().Foreground(greenColor).Render("● Connected  v"+m.healthStatus.Version))
@@ -88,19 +68,10 @@ func RenderSplash(m Model) string {
 		infoLines = append(infoLines, lipgloss.NewStyle().Foreground(orangeColor).Render("● Connecting..."))
 	}
 
-	body := lipgloss.JoinHorizontal(lipgloss.Top,
-		borderedLogo,
-		lipgloss.NewStyle().PaddingLeft(2).Render(strings.Join(infoLines, "\n")),
-	)
-
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		body,
-	)
-
 	return lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder()).
 		BorderBottom(true).BorderLeft(false).BorderRight(false).BorderTop(false).
 		Width(m.width).
-		Align(lipgloss.Left).
-		Render(content)
+		Padding(0, 2).
+		Render(strings.Join(infoLines, "  |  "))
 }

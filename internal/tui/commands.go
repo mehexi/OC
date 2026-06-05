@@ -5,8 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"oc/internal/api"
 	"oc/internal/history"
 	"oc/internal/server"
@@ -30,145 +28,10 @@ func (m Model) sendChat(text string) tea.Cmd {
 		if err != nil {
 			return ChatStreamMsg{Err: err, SessionID: sessionID}
 		}
+		resp.Body.Close()
 
-		go streamSSE(resp, sessionID)
 		return ChatStreamMsg{SessionID: sessionID}
 	}
-}
-
-type streamPart struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
-}
-
-type streamInfo struct {
-	ModelID string `json:"modelID"`
-}
-
-type streamResponse struct {
-	Info  streamInfo   `json:"info"`
-	Parts []streamPart `json:"parts"`
-}
-
-func streamSSE(resp *http.Response, sessionID string) {
-	defer resp.Body.Close()
-
-	reader := bufio.NewReader(resp.Body)
-	firstLine, err := reader.ReadString('\n')
-	if err != nil && err != io.EOF {
-		if program != nil {
-			program.Send(ChatStreamMsg{Err: err, SessionID: sessionID, Done: true})
-		}
-		return
-	}
-
-	trimmed := strings.TrimSpace(firstLine)
-
-	var part streamPart
-	if json.Unmarshal([]byte(trimmed), &part) == nil && part.Type != "" {
-		streamNDJSON(trimmed, reader, sessionID)
-	} else {
-		rest, err := io.ReadAll(reader)
-		if err != nil {
-			if program != nil {
-				program.Send(ChatStreamMsg{Err: err, SessionID: sessionID, Done: true})
-			}
-			return
-		}
-		streamSingleJSON(trimmed+string(rest), sessionID)
-	}
-}
-
-func streamNDJSON(firstLine string, reader *bufio.Reader, sessionID string) {
-	var fullText string
-	var modelName string
-
-	processLine := func(line string) {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			return
-		}
-
-		var part streamPart
-		if err := json.Unmarshal([]byte(line), &part); err != nil || part.Type == "" {
-			var resp streamResponse
-			if err := json.Unmarshal([]byte(line), &resp); err == nil && resp.Info.ModelID != "" {
-				modelName = resp.Info.ModelID
-				for _, p := range resp.Parts {
-					sendPart(p, &fullText, modelName, sessionID)
-				}
-			}
-			return
-		}
-
-		sendPart(part, &fullText, modelName, sessionID)
-	}
-
-	processLine(firstLine)
-
-	scanner := bufio.NewScanner(reader)
-	for scanner.Scan() {
-		processLine(scanner.Text())
-	}
-
-	if err := scanner.Err(); err != nil {
-		if program != nil {
-			program.Send(ChatStreamMsg{Err: err, SessionID: sessionID, Done: true})
-		}
-		return
-	}
-
-	if program != nil {
-		program.Send(ChatStreamMsg{
-			Text:      "",
-			FullText:  fullText,
-			SessionID: sessionID,
-			Done:      true,
-			ModelName: modelName,
-		})
-	}
-}
-
-func streamSingleJSON(body string, sessionID string) {
-	var msg streamResponse
-	if err := json.Unmarshal([]byte(body), &msg); err != nil {
-		if program != nil {
-			program.Send(ChatStreamMsg{Err: err, SessionID: sessionID, Done: true})
-		}
-		return
-	}
-
-	var fullText string
-	modelName := msg.Info.ModelID
-
-	for _, p := range msg.Parts {
-		sendPart(p, &fullText, modelName, sessionID)
-	}
-
-	if program != nil {
-		program.Send(ChatStreamMsg{
-			Text:      "",
-			FullText:  fullText,
-			SessionID: sessionID,
-			Done:      true,
-			ModelName: modelName,
-		})
-	}
-}
-
-func sendPart(p streamPart, fullText *string, modelName string, sessionID string) {
-	if p.Type == "text" {
-		*fullText += p.Text
-		if program != nil {
-			program.Send(ChatStreamMsg{
-				Text:      p.Text,
-				FullText:  *fullText,
-				SessionID: sessionID,
-				Done:      false,
-			})
-		}
-	}
-
 }
 
 func (m Model) checkHealth() tea.Cmd {
@@ -319,6 +182,9 @@ func (m Model) startSSEListener() tea.Cmd {
 		}
 		defer resp.Body.Close()
 
+		partTypes := make(map[string]string)
+		bufferedDeltas := make(map[string][]string)
+
 		reader := bufio.NewReader(resp.Body)
 		for {
 			line, err := reader.ReadString('\n')
@@ -362,6 +228,84 @@ func (m Model) startSSEListener() tea.Cmd {
 				}
 				if program != nil {
 					program.Send(PermissionRequestMsg{Request: &pp})
+				}
+
+			case "message.part.delta":
+				var props struct {
+					SessionID string `json:"sessionID"`
+					PartID    string `json:"partID"`
+					Field     string `json:"field"`
+					Delta     string `json:"delta"`
+				}
+				if err := json.Unmarshal(msg.Payload.Properties, &props); err != nil {
+					continue
+				}
+				if props.Delta == "" {
+					continue
+				}
+
+				if t, ok := partTypes[props.PartID]; ok {
+					msg := ChatStreamMsg{SessionID: props.SessionID}
+					if t == "reasoning" {
+						msg.Reasoning = props.Delta
+					} else {
+						msg.Text = props.Delta
+					}
+					if program != nil {
+						program.Send(msg)
+					}
+				} else {
+					bufferedDeltas[props.PartID] = append(bufferedDeltas[props.PartID], props.Delta)
+				}
+
+			case "message.part.updated":
+				var props struct {
+					SessionID string `json:"sessionID"`
+					Part      struct {
+						ID   string `json:"id"`
+						Type string `json:"type"`
+					} `json:"part"`
+				}
+				if err := json.Unmarshal(msg.Payload.Properties, &props); err != nil {
+					continue
+				}
+
+				partTypes[props.Part.ID] = props.Part.Type
+
+				if deltas, ok := bufferedDeltas[props.Part.ID]; ok {
+					delete(bufferedDeltas, props.Part.ID)
+					for _, delta := range deltas {
+						msg := ChatStreamMsg{SessionID: props.SessionID}
+						if props.Part.Type == "reasoning" {
+							msg.Reasoning = delta
+						} else {
+							msg.Text = delta
+						}
+						if program != nil {
+							program.Send(msg)
+						}
+					}
+				}
+
+			case "message.updated":
+				var props struct {
+					SessionID string `json:"sessionID"`
+					Info      struct {
+						Role    string `json:"role"`
+						Finish  string `json:"finish,omitempty"`
+						ModelID string `json:"modelID,omitempty"`
+					} `json:"info"`
+				}
+				if err := json.Unmarshal(msg.Payload.Properties, &props); err != nil {
+					continue
+				}
+
+				if props.Info.Role == "assistant" && props.Info.Finish != "" && program != nil {
+					program.Send(ChatStreamMsg{
+						SessionID: props.SessionID,
+						Done:      true,
+						ModelName: props.Info.ModelID,
+					})
 				}
 			}
 		}
