@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Build linux/amd64
+        run: |
+          mkdir -p dist/oc_linux_amd64
+          GOOS=linux GOARCH=amd64 go build -o dist/oc_linux_amd64/oc ./cmd/oc
+
+      - name: Build linux/arm64
+        run: |
+          mkdir -p dist/oc_linux_arm64
+          GOOS=linux GOARCH=arm64 go build -o dist/oc_linux_arm64/oc ./cmd/oc
+
+      - name: Build darwin/amd64
+        run: |
+          mkdir -p dist/oc_darwin_amd64
+          GOOS=darwin GOARCH=amd64 go build -o dist/oc_darwin_amd64/oc ./cmd/oc
+
+      - name: Build darwin/arm64
+        run: |
+          mkdir -p dist/oc_darwin_arm64
+          GOOS=darwin GOARCH=arm64 go build -o dist/oc_darwin_arm64/oc ./cmd/oc
+
+      - name: Package tarballs
+        run: |
+          tar czf oc_linux_amd64.tar.gz -C dist/oc_linux_amd64 oc
+          tar czf oc_linux_arm64.tar.gz -C dist/oc_linux_arm64 oc
+          tar czf oc_darwin_amd64.tar.gz -C dist/oc_darwin_amd64 oc
+          tar czf oc_darwin_arm64.tar.gz -C dist/oc_darwin_arm64 oc
+
+      - name: Generate checksums
+        run: sha256sum oc_*.tar.gz > checksums.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            oc_*.tar.gz
+            checksums.txt
+          generate_release_notes: true
