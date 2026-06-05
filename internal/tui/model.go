@@ -24,6 +24,7 @@ const (
 	modeQus
 	modeSession
 	modeCmd
+	modePerm
 )
 
 type cmdItem struct {
@@ -37,18 +38,21 @@ type qusItem struct {
 }
 
 type ChatMessage struct {
-	Role    string
-	Content string
+	Role      string
+	Content   string
+	Reasoning string
 }
 
 type Model struct {
-	viewPort           viewport.Model
-	inputText          textinput.Model
-	messages           []ChatMessage
-	sessionId          string
-	loading            bool
-	streaming          bool
-	pendingControl     *api.ControlRequest
+	viewPort            viewport.Model
+	inputText           textinput.Model
+	messages            []ChatMessage
+	sessionId           string
+	loading             bool
+	streaming            bool
+	pendingPermission     *api.PermissionReqInfo
+	permissionMsgIndex   int
+	pendingControl      *api.ControlRequest
 	currentQuestionIdx int
 	questionAnswers    []string
 	awaitingResponse   bool
@@ -101,16 +105,24 @@ type ChatResponseMsg struct {
 }
 
 type ChatStreamMsg struct {
-	Text      string
-	SessionID string
-	FullText  string
-	Done      bool
-	ModelName string
-	Err       error
+	Text           string
+	Reasoning      string
+	SessionID      string
+	FullText       string
+	FullReasoning  string
+	Done           bool
+	ModelName      string
+	Err            error
 }
 
 type ControlRequestMsg struct {
 	Request *api.ControlRequest
+	Err     error
+}
+
+type PermissionRequestMsg struct {
+	Request *api.PermissionReqInfo
+	Reply   string
 	Err     error
 }
 
@@ -149,13 +161,14 @@ func IntialModel() Model {
 	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(24))
 
 	return Model{
-		viewPort:   vp,
-		inputText:  ti,
-		messages:   []ChatMessage{},
-		sessionId:  "",
-		loading:    false,
-		width:      80,
-		termHeight: 24,
-		mode:       modeInsert,
+		viewPort:           vp,
+		inputText:          ti,
+		messages:           []ChatMessage{},
+		sessionId:          "",
+		loading:            false,
+		width:              80,
+		termHeight:         24,
+		mode:               modeInsert,
+		permissionMsgIndex: -1,
 	}
 }
