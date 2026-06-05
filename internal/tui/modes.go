@@ -395,10 +395,14 @@ func filteredCmdList(m Model) []cmdItem {
 }
 
 var cmdList = []cmdItem{
+	{Name: "/help", Category: "help", Description: "Show available commands"},
 	{Name: "/sessions", Category: "history", Description: "List and load past sessions"},
-	{Name: "/exit", Category: "exit", Description: "exit from app"},
 	{Name: "/session new", Category: "history", Description: "Start a fresh session"},
+	{Name: "/clear", Category: "chat", Description: "Clear chat messages"},
+	{Name: "/retry", Category: "chat", Description: "Re-send last user message"},
 	{Name: "/load <n>", Category: "history", Description: "Load session by number"},
+	{Name: "/tokens", Category: "info", Description: "Show token usage"},
+	{Name: "/exit", Category: "exit", Description: "Quit the app"},
 }
 
 func (m Model) showCmdList() Model {
@@ -484,12 +488,40 @@ func (m Model) executeCommand(input string) (Model, tea.Cmd) {
 	m.inputText.SetValue("")
 	m = m.syncLayout()
 	parts := strings.Fields(input)
-	if len(parts) == 2 && parts[0] == "/session" && parts[1] == "new" {
+
+	switch {
+	case len(parts) == 2 && parts[0] == "/session" && parts[1] == "new":
 		m.sessionId = ""
 		m.messages = nil
 		m = m.refreshMessages()
 		return m, m.addAssistantMsg("Started a new session.")
+
+	case parts[0] == "/clear":
+		m.messages = nil
+		m = m.refreshMessages()
+		return m, m.addAssistantMsg("Chat cleared.")
+
+	case parts[0] == "/retry":
+		if len(m.messages) == 0 {
+			return m, m.addAssistantMsg("Nothing to retry.")
+		}
+		lastUserIdx := -1
+		for i := len(m.messages) - 1; i >= 0; i-- {
+			if m.messages[i].Role == "user" {
+				lastUserIdx = i
+				break
+			}
+		}
+		if lastUserIdx == -1 {
+			return m, m.addAssistantMsg("No user message to retry.")
+		}
+		lastInput := m.messages[lastUserIdx].Content
+		m.messages = m.messages[:lastUserIdx+1]
+		m = m.refreshMessages()
+		m.loading = true
+		return m, m.sendChat(lastInput)
 	}
+
 	return m, m.handleCommand(input)
 }
 
@@ -508,4 +540,31 @@ func (m Model) handleCmdCancel() (Model, tea.Cmd) {
 	m.inputText.Placeholder = "Ask anything ..."
 	m.inputText.SetValue("")
 	return m.syncLayout(), nil
+}
+
+func (m Model) onPermKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
+	var reply string
+	switch msg.String() {
+	case "y":
+		reply = "once"
+	case "a":
+		reply = "always"
+	case "n", "esc", "ctrl+c":
+		reply = "reject"
+	default:
+		return m, nil
+	}
+	id := m.pendingPermission.ID
+	m.pendingPermission = nil
+	m.mode = modeInsert
+	m.inputText.Focus()
+	m = m.syncLayout()
+	r := reply
+	return m, func() tea.Msg {
+		err := m.client.ReplyToPermission(id, r)
+		if err != nil {
+			return PermissionRequestMsg{Err: err}
+		}
+		return PermissionRequestMsg{Reply: r}
+	}
 }

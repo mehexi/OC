@@ -161,23 +161,41 @@ func renderSessionView(m Model) string {
 }
 
 func RenderChatBubble(msg ChatMessage, m Model) string {
-	color := cyanColor
-	prefix := "You >"
+	tagColor := cyanColor
+	tag := "you"
 	switch msg.Role {
 	case "assistant":
-		color = whiteColor
-		prefix = "oc >"
-
+		tagColor = mutedColor
+		tag = "oc"
+	case "permission":
+		tagColor = orangeColor
+		tag = "perm"
 	}
 
-	prefixRendered := lipgloss.NewStyle().Foreground(color).Render(prefix)
-	rendered := RenderMarkdown(msg.Content, m.width-8)
+	tagRendered := lipgloss.NewStyle().
+		Foreground(tagColor).
+		Render(tag)
 
-	body := lipgloss.NewStyle().
+	var body string
+	if msg.Reasoning != "" {
+		boxWidth := m.width - 6
+		reasoningStyle := lipgloss.NewStyle().
+			Foreground(mutedColor).
+			Italic(true)
+		bordered := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(mutedColor).
+			Padding(0, 1).
+			Width(boxWidth)
+		body = bordered.Render(reasoningStyle.Render("💭 " + msg.Reasoning)) + "\n\n"
+	}
+
+	rendered := RenderMarkdown(msg.Content, m.width-8)
+	body += tagRendered + "\n" + lipgloss.NewStyle().
 		PaddingLeft(2).
 		PaddingRight(2).
 		Width(m.width - 4).
-		Render(prefixRendered + " " + rendered)
+		Render(rendered)
 
 	return body
 }
@@ -202,6 +220,9 @@ func inputModeTag(m Model) string {
 	case modeCmd:
 		label = " COMMANDS "
 		fg = cyanColor
+	case modePerm:
+		label = " PERMISSION "
+		fg = orangeColor
 	}
 
 	return lipgloss.NewStyle().

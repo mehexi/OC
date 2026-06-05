@@ -57,6 +57,6 @@ func EnsureRunning() (string, error) {
 }
 
 func KillServer() error {
-	cmd := exec.Command("pkill", "-f", "opencode ser")
+	cmd := exec.Command("pkill", "-f", "opencode serve")
 	return cmd.Run()
 }

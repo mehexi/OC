@@ -166,10 +166,26 @@ func (m Model) onStreamMsg(msg ChatStreamMsg) (Model, tea.Cmd) {
 		}
 	}
 
+	// Ignore SSE events from other sessions
+	if msg.SessionID != "" && m.sessionId != "" && msg.SessionID != m.sessionId {
+		return m, nil
+	}
+
 	if msg.Done {
+		if !m.streaming {
+			return m, nil
+		}
 		m.streaming = false
 		if msg.ModelName != "" {
 			m.modelName = msg.ModelName
+		}
+		if msg.FullReasoning != "" {
+			for i := len(m.messages) - 1; i >= 0; i-- {
+				if m.messages[i].Role == "assistant" {
+					m.messages[i].Reasoning = msg.FullReasoning
+					break
+				}
+			}
 		}
 		// Persist final assistant message
 		for i := len(m.messages) - 1; i >= 0; i-- {
@@ -185,14 +201,18 @@ func (m Model) onStreamMsg(msg ChatStreamMsg) (Model, tea.Cmd) {
 	firstStream := !m.streaming
 	m.streaming = true
 
-	if msg.Text == "" {
-		return m, nil
+	// Ensure an assistant message exists to append to
+	if len(m.messages) == 0 || m.messages[len(m.messages)-1].Role != "assistant" {
+		m.messages = append(m.messages, ChatMessage{Role: "assistant"})
 	}
 
-	if len(m.messages) > 0 && m.messages[len(m.messages)-1].Role == "assistant" {
-		m.messages[len(m.messages)-1].Content += msg.Text
-	} else {
-		m.messages = append(m.messages, ChatMessage{Role: "assistant", Content: msg.Text})
+	last := &m.messages[len(m.messages)-1]
+
+	if msg.Text != "" {
+		last.Content += msg.Text
+	}
+	if msg.Reasoning != "" {
+		last.Reasoning += msg.Reasoning
 	}
 
 	m = m.refreshMessages()
@@ -306,6 +326,8 @@ func (m Model) onKeyPress(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m.onSessionKey(msg)
 	case modeCmd:
 		return m.onCmdKey(msg)
+	case modePerm:
+		return m.onPermKey(msg)
 	default:
 		return m.onInsertKey(msg)
 	}
@@ -335,6 +357,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onStreamMsg(msg)
 	case ControlRequestMsg:
 		return m.onControlRequest(msg)
+	case PermissionRequestMsg:
+		if msg.Err != nil {
+			m.messages = append(m.messages, ChatMessage{Role: "assistant", Content: "Permission error: " + msg.Err.Error()})
+			return m.refreshMessages(), nil
+		}
+		if msg.Reply != "" {
+			m.pendingPermission = nil
+			var label string
+			switch msg.Reply {
+			case "once":
+				label = "Permission granted (once)"
+			case "always":
+				label = "Permission granted (always)"
+			case "reject":
+				label = "Permission rejected"
+			}
+			if m.permissionMsgIndex >= 0 && m.permissionMsgIndex < len(m.messages) {
+				m.messages[m.permissionMsgIndex].Content = label
+			}
+			m.permissionMsgIndex = -1
+			return m.refreshMessages(), nil
+		}
+		m.pendingPermission = msg.Request
+		m.mode = modePerm
+		m.inputText.Blur()
+		patterns := strings.Join(msg.Request.Patterns, ", ")
+		m.permissionMsgIndex = len(m.messages)
+		m.messages = append(m.messages, ChatMessage{Role: "permission", Content: "Permission: " + msg.Request.Permission + " on " + patterns + "\n  y=once  a=always  n=reject  esc=cancel"})
+		return m.refreshMessages(), nil
 	case ChatResponseMsg:
 		return m.onChatResponse(msg)
 	case LoadSessionMsg:

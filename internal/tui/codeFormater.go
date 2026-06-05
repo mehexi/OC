@@ -25,7 +25,10 @@ var glamourStyle = func() []byte {
 }()
 
 func RenderMarkdown(content string, width int) string {
-	r, err := glamour.NewTermRenderer()
+	r, err := glamour.NewTermRenderer(
+		glamour.WithWordWrap(width),
+		glamour.WithPreservedNewLines(),
+	)
 	if err != nil {
 		return content
 	}
