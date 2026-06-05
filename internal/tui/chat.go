@@ -167,7 +167,9 @@ func RenderChatBubble(msg ChatMessage, m Model) string {
 	case "assistant":
 		color = whiteColor
 		prefix = "oc >"
-
+	case "permission":
+		color = orangeColor
+		prefix = "🔑"
 	}
 
 	prefixRendered := lipgloss.NewStyle().Foreground(color).Render(prefix)
@@ -202,6 +204,9 @@ func inputModeTag(m Model) string {
 	case modeCmd:
 		label = " COMMANDS "
 		fg = cyanColor
+	case modePerm:
+		label = " PERMISSION "
+		fg = orangeColor
 	}
 
 	return lipgloss.NewStyle().

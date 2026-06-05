@@ -335,27 +335,34 @@ func (m Model) startSSEListener() tea.Cmd {
 			if err := json.Unmarshal([]byte(data), &msg); err != nil {
 				continue
 			}
-			if msg.Payload.Type != "question.asked" {
-				continue
-			}
 
-			var qp api.QuestionProperties
-			if err := json.Unmarshal(msg.Payload.Properties, &qp); err != nil {
-				continue
-			}
-			if len(qp.Questions) == 0 {
-				continue
-			}
-
-			cr := &api.ControlRequest{
-				ID:   qp.ID,
-				Type: "question.asked",
-				Data: api.ControlRequestData{
-					Questions: qp.Questions,
-				},
-			}
-			if program != nil {
-				program.Send(ControlRequestMsg{Request: cr})
+			switch msg.Payload.Type {
+			case "question.asked":
+				var qp api.QuestionProperties
+				if err := json.Unmarshal(msg.Payload.Properties, &qp); err != nil {
+					continue
+				}
+				if len(qp.Questions) == 0 {
+					continue
+				}
+				cr := &api.ControlRequest{
+					ID:   qp.ID,
+					Type: "question.asked",
+					Data: api.ControlRequestData{
+						Questions: qp.Questions,
+					},
+				}
+				if program != nil {
+					program.Send(ControlRequestMsg{Request: cr})
+				}
+			case "permission.asked":
+				var pp api.PermissionReqInfo
+				if err := json.Unmarshal(msg.Payload.Properties, &pp); err != nil {
+					continue
+				}
+				if program != nil {
+					program.Send(PermissionRequestMsg{Request: &pp})
+				}
 			}
 		}
 	}

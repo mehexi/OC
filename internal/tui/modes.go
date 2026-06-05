@@ -541,3 +541,30 @@ func (m Model) handleCmdCancel() (Model, tea.Cmd) {
 	m.inputText.SetValue("")
 	return m.syncLayout(), nil
 }
+
+func (m Model) onPermKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
+	var reply string
+	switch msg.String() {
+	case "y":
+		reply = "once"
+	case "a":
+		reply = "always"
+	case "n", "esc", "ctrl+c":
+		reply = "reject"
+	default:
+		return m, nil
+	}
+	id := m.pendingPermission.ID
+	m.pendingPermission = nil
+	m.mode = modeInsert
+	m.inputText.Focus()
+	m = m.syncLayout()
+	r := reply
+	return m, func() tea.Msg {
+		err := m.client.ReplyToPermission(id, r)
+		if err != nil {
+			return PermissionRequestMsg{Err: err}
+		}
+		return PermissionRequestMsg{Reply: r}
+	}
+}

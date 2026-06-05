@@ -114,6 +114,13 @@ type QuestionProperties struct {
 	Questions []QuestionData `json:"questions"`
 }
 
+type PermissionReqInfo struct {
+	ID         string   `json:"id"`
+	SessionID  string   `json:"sessionID"`
+	Permission string   `json:"permission"`
+	Patterns   []string `json:"patterns"`
+}
+
 type ControlRequest struct {
 	ID   string             `json:"id"`
 	Type string             `json:"type"`
@@ -148,6 +155,27 @@ func (c *Client) SubscribeGlobalEvents(ctx context.Context) (*http.Response, err
 		return nil, fmt.Errorf("subscribe events: unexpected status %d", resp.StatusCode)
 	}
 	return resp, nil
+}
+
+func (c *Client) ReplyToPermission(id string, reply string) error {
+	b, _ := json.Marshal(map[string]string{"reply": reply})
+	req, err := http.NewRequest("POST", c.baseURL+"/permission/"+id+"/reply", bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.Directory != "" {
+		req.Header.Set("x-opencode-directory", c.Directory)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("reply to permission: unexpected status %d", resp.StatusCode)
+	}
+	return nil
 }
 
 func (c *Client) ReplyToQuestion(id string, answers [][]string) error {

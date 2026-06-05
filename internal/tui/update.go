@@ -306,6 +306,8 @@ func (m Model) onKeyPress(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m.onSessionKey(msg)
 	case modeCmd:
 		return m.onCmdKey(msg)
+	case modePerm:
+		return m.onPermKey(msg)
 	default:
 		return m.onInsertKey(msg)
 	}
@@ -335,6 +337,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onStreamMsg(msg)
 	case ControlRequestMsg:
 		return m.onControlRequest(msg)
+	case PermissionRequestMsg:
+		if msg.Err != nil {
+			m.messages = append(m.messages, ChatMessage{Role: "assistant", Content: "Permission error: " + msg.Err.Error()})
+			return m.refreshMessages(), nil
+		}
+		if msg.Reply != "" {
+			m.pendingPermission = nil
+			var label string
+			switch msg.Reply {
+			case "once":
+				label = "Permission granted (once)"
+			case "always":
+				label = "Permission granted (always)"
+			case "reject":
+				label = "Permission rejected"
+			}
+			if m.permissionMsgIndex >= 0 && m.permissionMsgIndex < len(m.messages) {
+				m.messages[m.permissionMsgIndex].Content = label
+			}
+			m.permissionMsgIndex = -1
+			return m.refreshMessages(), nil
+		}
+		m.pendingPermission = msg.Request
+		m.mode = modePerm
+		m.inputText.Blur()
+		patterns := strings.Join(msg.Request.Patterns, ", ")
+		m.permissionMsgIndex = len(m.messages)
+		m.messages = append(m.messages, ChatMessage{Role: "permission", Content: "Permission: " + msg.Request.Permission + " on " + patterns + "\n  y=once  a=always  n=reject  esc=cancel"})
+		return m.refreshMessages(), nil
 	case ChatResponseMsg:
 		return m.onChatResponse(msg)
 	case LoadSessionMsg:

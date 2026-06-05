@@ -24,6 +24,7 @@ const (
 	modeQus
 	modeSession
 	modeCmd
+	modePerm
 )
 
 type cmdItem struct {
@@ -42,13 +43,15 @@ type ChatMessage struct {
 }
 
 type Model struct {
-	viewPort           viewport.Model
-	inputText          textinput.Model
-	messages           []ChatMessage
-	sessionId          string
-	loading            bool
-	streaming          bool
-	pendingControl     *api.ControlRequest
+	viewPort            viewport.Model
+	inputText           textinput.Model
+	messages            []ChatMessage
+	sessionId           string
+	loading             bool
+	streaming            bool
+	pendingPermission     *api.PermissionReqInfo
+	permissionMsgIndex   int
+	pendingControl      *api.ControlRequest
 	currentQuestionIdx int
 	questionAnswers    []string
 	awaitingResponse   bool
@@ -114,6 +117,12 @@ type ControlRequestMsg struct {
 	Err     error
 }
 
+type PermissionRequestMsg struct {
+	Request *api.PermissionReqInfo
+	Reply   string
+	Err     error
+}
+
 type LoadSessionMsg struct {
 	Session *history.Session
 }
@@ -149,13 +158,14 @@ func IntialModel() Model {
 	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(24))
 
 	return Model{
-		viewPort:   vp,
-		inputText:  ti,
-		messages:   []ChatMessage{},
-		sessionId:  "",
-		loading:    false,
-		width:      80,
-		termHeight: 24,
-		mode:       modeInsert,
+		viewPort:           vp,
+		inputText:          ti,
+		messages:           []ChatMessage{},
+		sessionId:          "",
+		loading:            false,
+		width:              80,
+		termHeight:         24,
+		mode:               modeInsert,
+		permissionMsgIndex: -1,
 	}
 }
