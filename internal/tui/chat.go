@@ -100,7 +100,7 @@ func renderCmdView(m Model) string {
 	lines = append(lines, "commands")
 	lines = append(lines, strings.Repeat("-", 10))
 
-	for i := 0; i < itemsPerPage; i++ {
+	for i := range itemsPerPage {
 		idx := start + i
 		if idx >= total {
 			lines = append(lines, "")
@@ -135,7 +135,7 @@ func renderSessionView(m Model) string {
 	lines = append(lines, fmt.Sprintf("%d sessions", total))
 	lines = append(lines, strings.Repeat("-", 12))
 
-	for i := 0; i < itemsPerPage; i++ {
+	for i := range itemsPerPage {
 		idx := start + i
 		if idx >= total {
 			lines = append(lines, "")
@@ -162,11 +162,11 @@ func renderSessionView(m Model) string {
 
 func RenderChatBubble(msg ChatMessage, m Model) string {
 	tagColor := cyanColor
-	tag := "you"
+	tag := "you >"
 	switch msg.Role {
 	case "assistant":
 		tagColor = mutedColor
-		tag = "oc"
+		tag = "oc >"
 	case "permission":
 		tagColor = orangeColor
 		tag = "perm"
@@ -187,16 +187,11 @@ func RenderChatBubble(msg ChatMessage, m Model) string {
 			BorderForeground(mutedColor).
 			Padding(0, 1).
 			Width(boxWidth)
-		body = bordered.Render(reasoningStyle.Render("💭 " + msg.Reasoning)) + "\n\n"
+		body = bordered.Render(reasoningStyle.Render("💭 "+msg.Reasoning)) + "\n\n"
 	}
 
-	rendered := RenderMarkdown(msg.Content, m.width-8)
-	body += tagRendered + "\n" + lipgloss.NewStyle().
-		PaddingLeft(2).
-		PaddingRight(2).
-		Width(m.width - 4).
-		Render(rendered)
-
+	rendered := RenderMarkdown(msg.Content)
+	body += lipgloss.JoinHorizontal(lipgloss.Top, tagRendered, " ", lipgloss.NewStyle().Render(rendered))
 	return body
 }
 

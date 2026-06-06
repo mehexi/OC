@@ -3,6 +3,7 @@ package tui
 import (
 	"oc/internal/api"
 	"oc/internal/history"
+	"oc/internal/tui/commands"
 
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
@@ -44,19 +45,20 @@ type ChatMessage struct {
 }
 
 type Model struct {
-	viewPort            viewport.Model
-	inputText           textinput.Model
-	messages            []ChatMessage
-	sessionId           string
-	loading             bool
-	streaming            bool
-	pendingPermission     *api.PermissionReqInfo
-	permissionMsgIndex   int
-	pendingControl      *api.ControlRequest
+	viewPort           viewport.Model
+	inputText          textinput.Model
+	messages           []ChatMessage
+	sessionId          string
+	loading            bool
+	streaming          bool
+	pendingPermission  *api.PermissionReqInfo
+	permissionMsgIndex int
+	pendingControl     *api.ControlRequest
 	currentQuestionIdx int
 	questionAnswers    []string
 	awaitingResponse   bool
 	width              int
+	multiAgent         bool
 
 	// TIPS:: serevr and stuff
 	serverAddr    string
@@ -86,68 +88,20 @@ type Model struct {
 	cmdPage       int
 }
 
-type ServerStartedMsg struct {
-	Address string
-}
-
-type ServerErrMsg struct{ err error }
-
-type HealthCheckMsg struct {
-	Status *api.HealthResponse
-	Err    error
-}
-
-type ChatResponseMsg struct {
-	Response  string
-	SessionID string
-	ModelName string
-	Err       error
-}
-
-type ChatStreamMsg struct {
-	Text           string
-	Reasoning      string
-	SessionID      string
-	FullText       string
-	FullReasoning  string
-	Done           bool
-	ModelName      string
-	Err            error
-}
-
-type ControlRequestMsg struct {
-	Request *api.ControlRequest
-	Err     error
-}
-
-type PermissionRequestMsg struct {
-	Request *api.PermissionReqInfo
-	Reply   string
-	Err     error
-}
-
-type LoadSessionMsg struct {
-	Session *history.Session
-}
-
-type ProvidersInfoMsg struct {
-	ModelName string
-	Err       error
-}
-
-type PathMsg struct {
-	Path string
-	Err  error
-}
-
-type SessionUsageMsg struct {
-	ModelName    string
-	TokensUsed   int
-	ContextLimit int
-	Err          error
-}
-
-type ShowSessionListMsg struct{}
+type (
+	ServerStartedMsg      = commands.ServerStartedMsg
+	ServerErrMsg          = commands.ServerErrMsg
+	HealthCheckMsg        = commands.HealthCheckMsg
+	ChatResponseMsg       = commands.ChatResponseMsg
+	ChatStreamMsg         = commands.ChatStreamMsg
+	ControlRequestMsg     = commands.ControlRequestMsg
+	PermissionRequestMsg  = commands.PermissionRequestMsg
+	LoadSessionMsg        = commands.LoadSessionMsg
+	ProvidersInfoMsg      = commands.ProvidersInfoMsg
+	PathMsg               = commands.PathMsg
+	SessionUsageMsg       = commands.SessionUsageMsg
+	ShowSessionListMsg    = commands.ShowSessionListMsg
+)
 
 func IntialModel() Model {
 	ti := textinput.New()
@@ -170,5 +124,6 @@ func IntialModel() Model {
 		termHeight:         24,
 		mode:               modeInsert,
 		permissionMsgIndex: -1,
+		multiAgent:         false,
 	}
 }

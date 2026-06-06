@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"oc/internal/api"
 	"oc/internal/history"
+	"oc/internal/tui/commands"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -14,7 +15,7 @@ import (
 func (m Model) onServerStarted(msg ServerStartedMsg) (Model, tea.Cmd) {
 	m.serverAddr = msg.Address
 	m.client = api.New(msg.Address)
-	return m, m.checkHealth()
+	return m, commands.CheckHealth(m.client)
 }
 
 func (m Model) refreshMessages() Model {
@@ -38,7 +39,7 @@ func (m Model) refreshMessages() Model {
 
 // onServerErr appends a server-error message to the chat.
 func (m Model) onServerErr(msg ServerErrMsg) (Model, tea.Cmd) {
-	m.messages = append(m.messages, ChatMessage{Role: "assistant", Content: "Server error: " + msg.err.Error()})
+	m.messages = append(m.messages, ChatMessage{Role: "assistant", Content: "Server error: " + msg.Err.Error()})
 	return m.refreshMessages(), nil
 }
 
@@ -52,7 +53,7 @@ func (m Model) onHealthCheck(msg HealthCheckMsg) (Model, tea.Cmd) {
 		m.healthStatus = msg.Status
 		welcome := fmt.Sprintf("Server v%s connected. Type /sessions for history.", msg.Status.Version)
 		m.messages = append(m.messages, ChatMessage{Role: "assistant", Content: welcome})
-		return m.refreshMessages(), tea.Batch(m.fetchProviders(), m.fetchPath())
+		return m.refreshMessages(), tea.Batch(commands.FetchProviders(m.client), commands.FetchPath(m.client))
 	}
 	return m.refreshMessages(), nil
 }
@@ -70,7 +71,7 @@ func (m Model) onPath(msg PathMsg) (Model, tea.Cmd) {
 	if msg.Err == nil {
 		m.currentPath = msg.Path
 		m.client.Directory = msg.Path
-		return m, m.startSSEListener()
+		return m, commands.StartSSEListener(m.client, program)
 	}
 	return m, nil
 }
@@ -85,6 +86,37 @@ func (m Model) onSessionUsage(msg SessionUsageMsg) (Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+func (m Model) onPermissionRequest(msg PermissionRequestMsg) (Model, tea.Cmd) {
+	if msg.Err != nil {
+		m.messages = append(m.messages, ChatMessage{Role: "assistant", Content: "Permission error: " + msg.Err.Error()})
+		return m.refreshMessages(), nil
+	}
+	if msg.Reply != "" {
+		m.pendingPermission = nil
+		var label string
+		switch msg.Reply {
+		case "once":
+			label = "Permission granted (once)"
+		case "always":
+			label = "Permission granted (always)"
+		case "reject":
+			label = "Permission rejected"
+		}
+		if m.permissionMsgIndex >= 0 && m.permissionMsgIndex < len(m.messages) {
+			m.messages[m.permissionMsgIndex].Content = label
+		}
+		m.permissionMsgIndex = -1
+		return m.refreshMessages(), nil
+	}
+	m.pendingPermission = msg.Request
+	m.mode = modePerm
+	m.inputText.Blur()
+	patterns := strings.Join(msg.Request.Patterns, ", ")
+	m.permissionMsgIndex = len(m.messages)
+	m.messages = append(m.messages, ChatMessage{Role: "permission", Content: "Permission: " + msg.Request.Permission + " on " + patterns + "\n  y=once  a=always  n=reject  esc=cancel"})
+	return m.refreshMessages(), nil
 }
 
 // onControlRequest handles incoming questions from the question tool.
@@ -127,7 +159,7 @@ func (m Model) onControlRequest(msg ControlRequestMsg) (Model, tea.Cmd) {
 				return m, nil
 			}
 			m.loading = true
-			return m, m.sendChat(strings.TrimSpace(sb.String()))
+			return m, commands.SendChat(m.client, m.sessionId, strings.TrimSpace(sb.String()))
 		}
 		if m.streaming {
 			return m, nil
@@ -194,14 +226,13 @@ func (m Model) onStreamMsg(msg ChatStreamMsg) (Model, tea.Cmd) {
 				break
 			}
 		}
-		return m.refreshMessages(), m.fetchSessionUsage()
+		return m.refreshMessages(), commands.FetchSessionUsage(m.client, m.sessionId)
 	}
 
 	m.loading = false
 	firstStream := !m.streaming
 	m.streaming = true
 
-	// Ensure an assistant message exists to append to
 	if len(m.messages) == 0 || m.messages[len(m.messages)-1].Role != "assistant" {
 		m.messages = append(m.messages, ChatMessage{Role: "assistant"})
 	}
@@ -223,7 +254,6 @@ func (m Model) onStreamMsg(msg ChatStreamMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// onChatResponse handles an incoming chat response or error and persists history.
 func (m Model) onChatResponse(msg ChatResponseMsg) (Model, tea.Cmd) {
 	m.loading = false
 	if msg.Err != nil {
@@ -246,10 +276,9 @@ func (m Model) onChatResponse(msg ChatResponseMsg) (Model, tea.Cmd) {
 	}
 	m = m.refreshMessages()
 	m.viewPort.GotoBottom()
-	return m, m.fetchSessionUsage()
+	return m, commands.FetchSessionUsage(m.client, m.sessionId)
 }
 
-// onLoadSession populates messages and session ID from a loaded history session.
 func (m Model) onLoadSession(msg LoadSessionMsg) (Model, tea.Cmd) {
 	m.sessionId = msg.Session.ID
 	m.messages = make([]ChatMessage, len(msg.Session.Messages))
@@ -258,7 +287,7 @@ func (m Model) onLoadSession(msg LoadSessionMsg) (Model, tea.Cmd) {
 	}
 	m = m.refreshMessages()
 	m.viewPort.GotoBottom()
-	return m, m.fetchSessionUsage()
+	return m, commands.FetchSessionUsage(m.client, m.sessionId)
 }
 
 const inputBoxHeight = 3
@@ -358,34 +387,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ControlRequestMsg:
 		return m.onControlRequest(msg)
 	case PermissionRequestMsg:
-		if msg.Err != nil {
-			m.messages = append(m.messages, ChatMessage{Role: "assistant", Content: "Permission error: " + msg.Err.Error()})
-			return m.refreshMessages(), nil
-		}
-		if msg.Reply != "" {
-			m.pendingPermission = nil
-			var label string
-			switch msg.Reply {
-			case "once":
-				label = "Permission granted (once)"
-			case "always":
-				label = "Permission granted (always)"
-			case "reject":
-				label = "Permission rejected"
-			}
-			if m.permissionMsgIndex >= 0 && m.permissionMsgIndex < len(m.messages) {
-				m.messages[m.permissionMsgIndex].Content = label
-			}
-			m.permissionMsgIndex = -1
-			return m.refreshMessages(), nil
-		}
-		m.pendingPermission = msg.Request
-		m.mode = modePerm
-		m.inputText.Blur()
-		patterns := strings.Join(msg.Request.Patterns, ", ")
-		m.permissionMsgIndex = len(m.messages)
-		m.messages = append(m.messages, ChatMessage{Role: "permission", Content: "Permission: " + msg.Request.Permission + " on " + patterns + "\n  y=once  a=always  n=reject  esc=cancel"})
-		return m.refreshMessages(), nil
+		return m.onPermissionRequest(msg)
 	case ChatResponseMsg:
 		return m.onChatResponse(msg)
 	case LoadSessionMsg:

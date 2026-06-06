@@ -56,8 +56,8 @@ type responsePart struct {
 }
 
 type ProvidersResponse struct {
-	Providers []map[string]interface{} `json:"providers"`
-	Default   map[string]string        `json:"default"`
+	Providers []map[string]any  `json:"providers"`
+	Default   map[string]string `json:"default"`
 }
 
 func (c *Client) readBody(req *http.Request, resp *http.Response) ([]byte, error) {
@@ -257,7 +257,7 @@ func (c *Client) GetPath() (string, error) {
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("get path: unexpected status %d: %s", resp.StatusCode, string(body))
 	}
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&result); err != nil {
 		return "", err
 	}
@@ -271,7 +271,7 @@ func (c *Client) GetPath() (string, error) {
 	return "", nil
 }
 
-func (c *Client) GetSession(id string) (map[string]interface{}, error) {
+func (c *Client) GetSession(id string) (map[string]any, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/session/"+id, nil)
@@ -289,7 +289,7 @@ func (c *Client) GetSession(id string) (map[string]interface{}, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("get session: unexpected status %d: %s", resp.StatusCode, string(body))
 	}
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&result); err != nil {
 		return nil, err
 	}

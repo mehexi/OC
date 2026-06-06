@@ -1,134 +1,31 @@
 package tui
 
 import (
-	"bufio"
-	"context"
-	"encoding/json"
 	"fmt"
-	"oc/internal/api"
 	"oc/internal/history"
 	"oc/internal/server"
+	"oc/internal/sysprompt"
+	"oc/internal/tui/commands"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 )
 
-func (m Model) sendChat(text string) tea.Cmd {
-	return func() tea.Msg {
-		sessionID := m.sessionId
-		if sessionID == "" {
-			id, err := m.client.CreateSession(text)
-			if err != nil {
-				return ChatStreamMsg{Err: err}
-			}
-			sessionID = id
-		}
-
-		resp, err := m.client.SendMessageRaw(sessionID, text)
-		if err != nil {
-			return ChatStreamMsg{Err: err, SessionID: sessionID}
-		}
-		resp.Body.Close()
-
-		return ChatStreamMsg{SessionID: sessionID}
-	}
-}
-
-func (m Model) checkHealth() tea.Cmd {
-	return func() tea.Msg {
-		status, err := m.client.Health()
-		return HealthCheckMsg{Status: status, Err: err}
-	}
-}
-
-func (m Model) fetchPath() tea.Cmd {
-	return func() tea.Msg {
-		p, err := m.client.GetPath()
-		if err != nil {
-			return PathMsg{Err: err}
-		}
-		return PathMsg{Path: p}
-	}
-}
-
-func (m Model) fetchProviders() tea.Cmd {
-	return func() tea.Msg {
-		resp, err := m.client.GetProviders()
-		if err != nil {
-			return ProvidersInfoMsg{Err: err}
-		}
-		modelName := ""
-		if len(resp.Default) > 0 {
-			for _, v := range resp.Default {
-				modelName = v
-				break
-			}
-		}
-		return ProvidersInfoMsg{ModelName: modelName}
-	}
-}
-
-func (m Model) fetchSessionUsage() tea.Cmd {
-	return func() tea.Msg {
-		if m.sessionId == "" {
-			return SessionUsageMsg{}
-		}
-		s, err := m.client.GetSession(m.sessionId)
-		if err != nil {
-			return SessionUsageMsg{Err: err}
-		}
-		tokens := 0
-		limit := 0
-		if t, ok := s["tokens"]; ok {
-			if tokensMap, ok := t.(map[string]interface{}); ok {
-				for _, key := range []string{"input", "output"} {
-					if v, ok := tokensMap[key]; ok {
-						if f, ok := v.(float64); ok {
-							tokens += int(f)
-						}
-					}
-				}
-			}
-		}
-		if l, ok := s["limit"]; ok {
-			if limitMap, ok := l.(map[string]interface{}); ok {
-				if ctx, ok := limitMap["context"]; ok {
-					if f, ok := ctx.(float64); ok {
-						limit = int(f)
-					}
-				}
-			}
-		}
-		return SessionUsageMsg{TokensUsed: tokens, ContextLimit: limit}
-	}
-}
-
-func (m Model) addAssistantMsg(content string) tea.Cmd {
-	return func() tea.Msg {
-		return ChatResponseMsg{Response: content}
-	}
-}
-
-func (m Model) showSessionListCmd() tea.Cmd {
-	return func() tea.Msg {
-		return ShowSessionListMsg{}
-	}
-}
-
-func (m Model) handleCommand(input string) tea.Cmd {
+func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 	parts := strings.Fields(input)
 	if len(parts) == 0 {
-		return nil
+		return m, nil
 	}
 
 	switch parts[0] {
 	case "/help":
-		return m.addAssistantMsg(
+		return m, commands.AddAssistantMsg(
 			"Commands:\n" +
 				"  /help          Show this help\n" +
 				"  /sessions      List and load past sessions\n" +
 				"  /session new   Start a fresh session\n" +
 				"  /clear         Clear chat messages\n" +
+				"  /multiagent    Toggle multi-agent mode — spawns sub-agents to work on tasks in parallel\n" +
 				"  /retry         Re-send last user message\n" +
 				"  /load <n>      Load session by number\n" +
 				"  /tokens        Show token usage\n" +
@@ -136,196 +33,40 @@ func (m Model) handleCommand(input string) tea.Cmd {
 		)
 
 	case "/sessions":
-		return m.showSessionListCmd()
+		return m, commands.ShowSessionListCmd()
 
 	case "/tokens":
 		usage := fmt.Sprintf("Model: %s  |  Tokens: %d / %d  |  Remaining: %d",
 			m.modelName, m.tokensUsed, m.contextLimit, m.contextLimit-m.tokensUsed)
-		return m.addAssistantMsg(usage)
+		return m, commands.AddAssistantMsg(usage)
 
 	case "/exit":
 		server.KillServer()
-		return tea.Quit
+		return m, tea.Quit
 
 	case "/load":
 		if len(parts) < 2 {
-			return m.addAssistantMsg("Usage: /load <number>")
+			return m, commands.AddAssistantMsg("Usage: /load <number>")
 		}
 		sessions, err := history.ListSessions()
 		if err != nil {
-			return m.addAssistantMsg("Error: " + err.Error())
+			return m, commands.AddAssistantMsg("Error: " + err.Error())
 		}
 		var n int
 		if _, err := fmt.Sscanf(parts[1], "%d", &n); err != nil || n < 1 || n > len(sessions) {
-			return m.addAssistantMsg(fmt.Sprintf("Invalid number. Choose 1-%d.", len(sessions)))
+			return m, commands.AddAssistantMsg(fmt.Sprintf("Invalid number. Choose 1-%d.", len(sessions)))
 		}
-		return func() tea.Msg {
+		return m, func() tea.Msg {
 			s, err := history.LoadSession(sessions[n-1].ID)
 			if err != nil {
 				return ChatResponseMsg{Err: fmt.Errorf("load session: %w", err)}
 			}
 			return LoadSessionMsg{Session: s}
 		}
-
+	case "/multiagent":
+		m.multiAgent = !m.multiAgent
+		return m, commands.SendChat(m.client, m.sessionId, sysprompt.JudgeSysPrompt())
 	default:
-		return m.addAssistantMsg("Unknown: " + parts[0] + "\nTry /help for available commands.")
-	}
-}
-
-func (m Model) startSSEListener() tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		resp, err := m.client.SubscribeGlobalEvents(ctx)
-		if err != nil {
-			return ControlRequestMsg{Err: err}
-		}
-		defer resp.Body.Close()
-
-		partTypes := make(map[string]string)
-		bufferedDeltas := make(map[string][]string)
-
-		reader := bufio.NewReader(resp.Body)
-		for {
-			line, err := reader.ReadString('\n')
-			if err != nil {
-				return nil
-			}
-			line = strings.TrimSpace(line)
-			if !strings.HasPrefix(line, "data: ") {
-				continue
-			}
-			data := strings.TrimPrefix(line, "data: ")
-
-			var msg api.SSEMessage
-			if err := json.Unmarshal([]byte(data), &msg); err != nil {
-				continue
-			}
-
-			switch msg.Payload.Type {
-			case "question.asked":
-				var qp api.QuestionProperties
-				if err := json.Unmarshal(msg.Payload.Properties, &qp); err != nil {
-					continue
-				}
-				if len(qp.Questions) == 0 {
-					continue
-				}
-				cr := &api.ControlRequest{
-					ID:   qp.ID,
-					Type: "question.asked",
-					Data: api.ControlRequestData{
-						Questions: qp.Questions,
-					},
-				}
-				if program != nil {
-					program.Send(ControlRequestMsg{Request: cr})
-				}
-			case "permission.asked":
-				var pp api.PermissionReqInfo
-				if err := json.Unmarshal(msg.Payload.Properties, &pp); err != nil {
-					continue
-				}
-				if program != nil {
-					program.Send(PermissionRequestMsg{Request: &pp})
-				}
-
-			case "message.part.delta":
-				var props struct {
-					SessionID string `json:"sessionID"`
-					PartID    string `json:"partID"`
-					Field     string `json:"field"`
-					Delta     string `json:"delta"`
-				}
-				if err := json.Unmarshal(msg.Payload.Properties, &props); err != nil {
-					continue
-				}
-				if props.Delta == "" {
-					continue
-				}
-
-				if t, ok := partTypes[props.PartID]; ok {
-					msg := ChatStreamMsg{SessionID: props.SessionID}
-					if t == "reasoning" {
-						msg.Reasoning = props.Delta
-					} else {
-						msg.Text = props.Delta
-					}
-					if program != nil {
-						program.Send(msg)
-					}
-				} else {
-					bufferedDeltas[props.PartID] = append(bufferedDeltas[props.PartID], props.Delta)
-				}
-
-			case "message.part.updated":
-				var props struct {
-					SessionID string `json:"sessionID"`
-					Part      struct {
-						ID   string `json:"id"`
-						Type string `json:"type"`
-					} `json:"part"`
-				}
-				if err := json.Unmarshal(msg.Payload.Properties, &props); err != nil {
-					continue
-				}
-
-				partTypes[props.Part.ID] = props.Part.Type
-
-				if deltas, ok := bufferedDeltas[props.Part.ID]; ok {
-					delete(bufferedDeltas, props.Part.ID)
-					for _, delta := range deltas {
-						msg := ChatStreamMsg{SessionID: props.SessionID}
-						if props.Part.Type == "reasoning" {
-							msg.Reasoning = delta
-						} else {
-							msg.Text = delta
-						}
-						if program != nil {
-							program.Send(msg)
-						}
-					}
-				}
-
-			case "message.updated":
-				var props struct {
-					SessionID string `json:"sessionID"`
-					Info      struct {
-						Role    string `json:"role"`
-						Finish  string `json:"finish,omitempty"`
-						ModelID string `json:"modelID,omitempty"`
-					} `json:"info"`
-				}
-				if err := json.Unmarshal(msg.Payload.Properties, &props); err != nil {
-					continue
-				}
-
-				if props.Info.Role == "assistant" && props.Info.Finish != "" && program != nil {
-					program.Send(ChatStreamMsg{
-						SessionID: props.SessionID,
-						Done:      true,
-						ModelName: props.Info.ModelID,
-					})
-				}
-			}
-		}
-	}
-}
-
-func (m Model) sendControlResponse() tea.Cmd {
-	return func() tea.Msg {
-		var answers [][]string
-		for i := range m.pendingControl.Data.Questions {
-			a := ""
-			if i < len(m.questionAnswers) {
-				a = m.questionAnswers[i]
-			}
-			answers = append(answers, []string{a})
-		}
-		err := m.client.ReplyToQuestion(m.pendingControl.ID, answers)
-		if err != nil {
-			return ControlRequestMsg{Err: err}
-		}
-		return ControlRequestMsg{}
+		return m, commands.AddAssistantMsg("Unknown: " + parts[0] + "\nTry /help for available commands.")
 	}
 }

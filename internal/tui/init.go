@@ -10,7 +10,7 @@ func initServer() tea.Cmd {
 	return func() tea.Msg {
 		addr, err := server.EnsureRunning()
 		if err != nil {
-			return ServerErrMsg{err}
+			return ServerErrMsg{Err: err}
 		}
 		return ServerStartedMsg{Address: addr}
 	}

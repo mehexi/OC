@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"oc/internal/history"
 	"oc/internal/server"
+	"oc/internal/tui/commands"
 	"strings"
 	"time"
 
@@ -76,9 +77,9 @@ func (m Model) onNormalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 					m.sessionId = ""
 					m.messages = nil
 					m = m.refreshMessages()
-					return m, m.addAssistantMsg("Started a new session.")
+					return m, 	commands.AddAssistantMsg("Started a new session.")
 				}
-				return m, m.handleCommand(input)
+				return m.handleCommand(input)
 			}
 			m.messages = append(m.messages, ChatMessage{Role: "user", Content: input})
 			if m.sessionId != "" {
@@ -87,7 +88,7 @@ func (m Model) onNormalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			m = m.refreshMessages()
 			m.inputText.SetValue("")
 			m.loading = true
-			return m, m.sendChat(input)
+			return m, commands.SendChat(m.client, m.sessionId, input)
 		}
 		return m, nil
 
@@ -127,12 +128,12 @@ func (m Model) onInsertKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 					m.sessionId = ""
 					m.messages = nil
 					m = m.refreshMessages()
-					return m, m.addAssistantMsg("Started a new session.")
+					return m, 	commands.AddAssistantMsg("Started a new session.")
 				}
 				if input == "/" {
 					return m.showCmdList(), nil
 				}
-				return m, m.handleCommand(input)
+				return m.handleCommand(input)
 			}
 			m.messages = append(m.messages, ChatMessage{Role: "user", Content: input})
 			if m.sessionId != "" {
@@ -141,7 +142,8 @@ func (m Model) onInsertKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			m = m.refreshMessages()
 			m.inputText.SetValue("")
 			m.loading = true
-			return m, m.sendChat(input)
+			m.viewPort.GotoBottom()
+			return m, commands.SendChat(m.client, m.sessionId, input)
 		}
 		return m, nil
 
@@ -260,7 +262,7 @@ func (m Model) handleQusAnswer() (Model, tea.Cmd) {
 	m.inputText.Placeholder = "Ask anything ..."
 	m.qusHeight = 0
 	m.loading = true
-	return m.syncLayout(), m.sendControlResponse()
+	return m.syncLayout(), commands.SendControlResponse(m.client, m.pendingControl, m.questionAnswers)
 }
 
 func (m Model) handleQusCancel() (Model, tea.Cmd) {
@@ -399,6 +401,7 @@ var cmdList = []cmdItem{
 	{Name: "/sessions", Category: "history", Description: "List and load past sessions"},
 	{Name: "/session new", Category: "history", Description: "Start a fresh session"},
 	{Name: "/clear", Category: "chat", Description: "Clear chat messages"},
+	{Name: "/multiagent", Category: "Agent", Description: "Toggle multi-agent mode — spawns sub-agents that work on tasks in parallel to solve complex problems faster"},
 	{Name: "/retry", Category: "chat", Description: "Re-send last user message"},
 	{Name: "/load <n>", Category: "history", Description: "Load session by number"},
 	{Name: "/tokens", Category: "info", Description: "Show token usage"},
@@ -494,16 +497,16 @@ func (m Model) executeCommand(input string) (Model, tea.Cmd) {
 		m.sessionId = ""
 		m.messages = nil
 		m = m.refreshMessages()
-		return m, m.addAssistantMsg("Started a new session.")
+		return m, 	commands.AddAssistantMsg("Started a new session.")
 
 	case parts[0] == "/clear":
 		m.messages = nil
 		m = m.refreshMessages()
-		return m, m.addAssistantMsg("Chat cleared.")
+		return m, 	commands.AddAssistantMsg("Chat cleared.")
 
 	case parts[0] == "/retry":
 		if len(m.messages) == 0 {
-			return m, m.addAssistantMsg("Nothing to retry.")
+			return m, 	commands.AddAssistantMsg("Nothing to retry.")
 		}
 		lastUserIdx := -1
 		for i := len(m.messages) - 1; i >= 0; i-- {
@@ -513,16 +516,17 @@ func (m Model) executeCommand(input string) (Model, tea.Cmd) {
 			}
 		}
 		if lastUserIdx == -1 {
-			return m, m.addAssistantMsg("No user message to retry.")
+			return m, 	commands.AddAssistantMsg("No user message to retry.")
 		}
 		lastInput := m.messages[lastUserIdx].Content
 		m.messages = m.messages[:lastUserIdx+1]
 		m = m.refreshMessages()
 		m.loading = true
-		return m, m.sendChat(lastInput)
+		return m, commands.SendChat(m.client, m.sessionId, lastInput)
+
 	}
 
-	return m, m.handleCommand(input)
+	return m.handleCommand(input)
 }
 
 func (m Model) handleCmdSelect(cmd string) (Model, tea.Cmd) {
