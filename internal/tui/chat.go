@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -160,6 +161,43 @@ func renderSessionView(m Model) string {
 	return strings.Join(lines, "\n")
 }
 
+// extractJudgeReason checks if content contains a judge JSON verdict
+// (has "multi_agent" + "reason" fields) and returns the reason text.
+func extractJudgeReason(content string) (string, bool) {
+	idx := strings.Index(content, `"multi_agent"`)
+	if idx < 0 {
+		return "", false
+	}
+	start := strings.LastIndex(content[:idx], "{")
+	if start < 0 {
+		return "", false
+	}
+	depth := 0
+	end := -1
+	for i := start; i < len(content); i++ {
+		switch content[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				end = i + 1
+				goto found
+			}
+		}
+	}
+	return "", false
+found:
+	var judge struct {
+		MultiAgent *bool  `json:"multi_agent"`
+		Reason     string `json:"reason"`
+	}
+	if err := json.Unmarshal([]byte(content[start:end]), &judge); err != nil || judge.MultiAgent == nil {
+		return "", false
+	}
+	return judge.Reason, true
+}
+
 func RenderChatBubble(msg ChatMessage, m Model) string {
 	tagColor := cyanColor
 	tag := "you >"
@@ -177,6 +215,12 @@ func RenderChatBubble(msg ChatMessage, m Model) string {
 		Render(tag)
 
 	var body string
+
+	content := msg.Content
+	if reason, ok := extractJudgeReason(content); ok {
+		content = reason
+	}
+
 	if msg.Reasoning != "" {
 		boxWidth := m.width - 6
 		reasoningStyle := lipgloss.NewStyle().
@@ -190,7 +234,7 @@ func RenderChatBubble(msg ChatMessage, m Model) string {
 		body = bordered.Render(reasoningStyle.Render("💭 "+msg.Reasoning)) + "\n\n"
 	}
 
-	rendered := RenderMarkdown(msg.Content)
+	rendered := RenderMarkdown(content)
 	body += lipgloss.JoinHorizontal(lipgloss.Top, tagRendered, " ", lipgloss.NewStyle().Render(rendered))
 	return body
 }

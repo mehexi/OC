@@ -127,8 +127,13 @@ func StartSSEListener(client *api.Client, program *tea.Program) tea.Cmd {
 
 			case "message.updated":
 				var props struct {
-					SessionID string `json:"sessionID"`
-					Info      struct {
+					SessionID     string   `json:"sessionID"`
+					MultiAgent    *bool    `json:"multi_agent"`
+					Agents        int      `json:"agents"`
+					Personalities []string `json:"personalities"`
+					Complexity    string   `json:"complexity"`
+					Reason        string   `json:"reason"`
+					Info          struct {
 						Role    string `json:"role"`
 						Finish  string `json:"finish,omitempty"`
 						ModelID string `json:"modelID,omitempty"`
@@ -136,6 +141,16 @@ func StartSSEListener(client *api.Client, program *tea.Program) tea.Cmd {
 				}
 				if err := json.Unmarshal(msg.Payload.Properties, &props); err != nil {
 					continue
+				}
+
+				if props.MultiAgent != nil && program != nil {
+					program.Send(MultiAgentPlanMsg{
+						SessionID:     props.SessionID,
+						Agents:        props.Agents,
+						Personalities: props.Personalities,
+						Complexity:    props.Complexity,
+						Reason:        props.Reason,
+					})
 				}
 
 				if props.Info.Role == "assistant" && props.Info.Finish != "" && program != nil {

@@ -198,8 +198,11 @@ func (m Model) onStreamMsg(msg ChatStreamMsg) (Model, tea.Cmd) {
 		}
 	}
 
-	// Ignore SSE events from other sessions
+	// Route SSE events to sub-agent handlers or ignore
 	if msg.SessionID != "" && m.sessionId != "" && msg.SessionID != m.sessionId {
+		if idx, ok := m.agentSessions[msg.SessionID]; ok {
+			return m.onSubAgentStream(msg, idx)
+		}
 		return m, nil
 	}
 
@@ -277,6 +280,235 @@ func (m Model) onChatResponse(msg ChatResponseMsg) (Model, tea.Cmd) {
 	m = m.refreshMessages()
 	m.viewPort.GotoBottom()
 	return m, commands.FetchSessionUsage(m.client, m.sessionId)
+}
+
+func (m Model) onSubAgentStream(msg ChatStreamMsg, agentIdx int) (Model, tea.Cmd) {
+	agent := &m.subAgents[agentIdx]
+
+	if msg.Err != nil {
+		agent.Status = "done"
+		return m.checkDebateProgress()
+	}
+
+	if msg.Done {
+		agent.Status = "done"
+		return m.checkDebateProgress()
+	}
+
+	if len(agent.Messages) == 0 || agent.Messages[len(agent.Messages)-1].Role != "assistant" {
+		agent.Messages = append(agent.Messages, ChatMessage{Role: "assistant"})
+	}
+
+	last := &agent.Messages[len(agent.Messages)-1]
+	if msg.Text != "" {
+		last.Content += msg.Text
+	}
+	return m, nil
+}
+
+func (m Model) onMultiAgentPlan(msg MultiAgentPlanMsg) (Model, tea.Cmd) {
+	m.loading = false
+	m.debatePhase = "spawning"
+
+	task := msg.Reason
+	for i := len(m.messages) - 1; i >= 0; i-- {
+		if m.messages[i].Role == "user" {
+			task = m.messages[i].Content
+			break
+		}
+	}
+	m.debateTask = task
+
+	m.messages = append(m.messages, ChatMessage{
+		Role:    "assistant",
+		Content: fmt.Sprintf("[Multi-Agent Debate] %d agents analyzing your task", msg.Agents),
+	})
+	m = m.refreshMessages()
+
+	var cmds []tea.Cmd
+	for i, personality := range msg.Personalities {
+		title := fmt.Sprintf("[%s] %s", personality, truncate(task, 80))
+		agent := SubAgent{
+			ID:          fmt.Sprintf("agent-%d", i),
+			Personality: personality,
+			Status:      "spawning",
+		}
+		m.subAgents = append(m.subAgents, agent)
+		cmds = append(cmds, commands.CreateSubSession(m.client, title, personality))
+	}
+
+	return m, tea.Batch(cmds...)
+}
+
+func (m Model) onSubAgentSpawned(msg SubAgentSpawnedMsg) (Model, tea.Cmd) {
+	if msg.Err != nil {
+		m.messages = append(m.messages, ChatMessage{Role: "assistant", Content: "Error spawning agent: " + msg.Err.Error()})
+		return m.refreshMessages(), nil
+	}
+
+	for i := range m.subAgents {
+		if m.subAgents[i].SessionID == "" {
+			m.subAgents[i].SessionID = msg.SessionID
+			m.subAgents[i].Status = "thinking"
+			m.agentSessions[msg.SessionID] = i
+			break
+		}
+	}
+	m = m.refreshMessages()
+
+	for _, a := range m.subAgents {
+		if a.SessionID == "" {
+			return m, nil
+		}
+	}
+
+	m.messages = append(m.messages, ChatMessage{
+		Role:    "assistant",
+		Content: fmt.Sprintf("[Multi-Agent Debate] All %d agents ready, starting round 1", len(m.subAgents)),
+	})
+	m = m.refreshMessages()
+	var cmd tea.Cmd
+	m, cmd = m.startDebateRound(1)
+	return m, cmd
+}
+
+func (m Model) startDebateRound(round int) (Model, tea.Cmd) {
+	m.debateRound = round
+	m.debatePhase = "debate"
+
+	for i := range m.subAgents {
+		m.subAgents[i].Status = "thinking"
+	}
+
+	var cmds []tea.Cmd
+	for _, agent := range m.subAgents {
+		prompt := buildDebatePrompt(agent, round, m.debateTask, m.subAgents)
+		cmds = append(cmds, commands.SendToSession(m.client, agent.SessionID, prompt))
+	}
+	return m, tea.Batch(cmds...)
+}
+
+func (m Model) checkDebateProgress() (Model, tea.Cmd) {
+	for _, a := range m.subAgents {
+		if a.Status != "done" {
+			return m, nil
+		}
+	}
+
+	for i := range m.subAgents {
+		m.subAgents[i].Status = "thinking"
+	}
+
+	var cmd tea.Cmd
+	switch m.debateRound {
+	case 1:
+		m.messages = append(m.messages, ChatMessage{
+			Role:    "assistant",
+			Content: "[Multi-Agent Debate] Round 1 complete, starting round 2",
+		})
+		m = m.refreshMessages()
+		m, cmd = m.startDebateRound(2)
+	case 2:
+		m.messages = append(m.messages, ChatMessage{
+			Role:    "assistant",
+			Content: "[Multi-Agent Debate] Round 2 complete, starting round 3",
+		})
+		m = m.refreshMessages()
+		m, cmd = m.startDebateRound(3)
+	case 3:
+		m.messages = append(m.messages, ChatMessage{
+			Role:    "assistant",
+			Content: "[Multi-Agent Debate] Debate complete, synthesizing final answer",
+		})
+		m = m.refreshMessages()
+		cmd = m.startSynthesis()
+	}
+
+	return m, cmd
+}
+
+func (m Model) startSynthesis() tea.Cmd {
+	m.debatePhase = "synthesis"
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Multi-Agent Debate on: %s\n\n", m.debateTask))
+	for _, agent := range m.subAgents {
+		sb.WriteString(fmt.Sprintf("=== %s ===\n", agent.Personality))
+		for _, msg := range agent.Messages {
+			sb.WriteString(msg.Content)
+			sb.WriteString("\n")
+		}
+		sb.WriteString("\n")
+	}
+
+	synthesisPrompt := fmt.Sprintf(`The following is a multi-agent debate about the task: "%s"
+
+The agents produced these analyses:
+
+%s
+
+Based on this debate, provide a comprehensive final answer that incorporates the best points from each perspective.`,
+		m.debateTask, strings.TrimSpace(sb.String()))
+
+	return commands.SendChat(m.client, m.sessionId, synthesisPrompt)
+}
+
+func buildDebatePrompt(agent SubAgent, round int, task string, allAgents []SubAgent) string {
+	var sb strings.Builder
+
+	descriptions := map[string]string{
+		"Architect":       "You think in systems, patterns, and long-term design. Focus on architecture, modularity, and scalability.",
+		"Skeptic":         "You challenge assumptions and find flaws and edge cases. Identify what could go wrong.",
+		"Pragmatist":      "You advocate for the fastest working solution with no over-engineering. Focus on simplicity and practicality.",
+		"Security":        "You find attack surfaces and vulnerabilities. Focus on security implications.",
+		"Devil's Advocate": "You argue the opposite approach to uncover blind spots in the proposed solutions.",
+		"Researcher":      "You analyze tradeoffs, prior art, and known pitfalls. Provide evidence-based insights.",
+		"Performance":     "You focus on bottlenecks, scalability, and efficiency. Identify performance implications.",
+	}
+
+	desc := descriptions[agent.Personality]
+	if desc == "" {
+		desc = "Provide your unique perspective on the task."
+	}
+
+	sb.WriteString(fmt.Sprintf("You are an AI with the personality of %s.\n%s\n\n", agent.Personality, desc))
+
+	switch round {
+	case 1:
+		sb.WriteString(fmt.Sprintf("Analyze this task from your perspective:\n\n%s\n\n", task))
+		sb.WriteString("Provide specific technical points and numbered arguments. Be concise but thorough.")
+	case 2:
+		sb.WriteString(fmt.Sprintf("Original task:\n%s\n\n", task))
+		sb.WriteString("Here are all the responses from the first round. Review each one and:\n")
+		sb.WriteString("1. Score each agent's key points from 1-5\n")
+		sb.WriteString("2. Identify which points you agree/disagree with\n")
+		sb.WriteString("3. Provide your refined perspective\n\n")
+		for _, other := range allAgents {
+			if other.ID == agent.ID {
+				continue
+			}
+			sb.WriteString(fmt.Sprintf("=== %s ===\n", other.Personality))
+			for _, m := range other.Messages {
+				sb.WriteString(m.Content)
+				sb.WriteString("\n")
+			}
+			sb.WriteString("\n")
+		}
+	case 3:
+		sb.WriteString(fmt.Sprintf("Original task:\n%s\n\n", task))
+		sb.WriteString("After reviewing all perspectives, provide your FINAL refined analysis.\n")
+		sb.WriteString("Focus on the strongest points that emerged from the debate.\n")
+		sb.WriteString("Format your response as numbered key points that should be included in the final solution.")
+	}
+
+	return sb.String()
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n-3] + "..."
 }
 
 func (m Model) onLoadSession(msg LoadSessionMsg) (Model, tea.Cmd) {
@@ -390,6 +622,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onPermissionRequest(msg)
 	case ChatResponseMsg:
 		return m.onChatResponse(msg)
+	case MultiAgentPlanMsg:
+		return m.onMultiAgentPlan(msg)
+	case SubAgentSpawnedMsg:
+		return m.onSubAgentSpawned(msg)
 	case LoadSessionMsg:
 		return m.onLoadSession(msg)
 	case ProvidersInfoMsg:
