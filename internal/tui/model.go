@@ -67,7 +67,7 @@ type Model struct {
 	questionAnswers    []string
 	awaitingResponse   bool
 	width              int
-	multiAgent         bool
+	multiAgent         *bool
 
 	// Multi-agent debate state
 	subAgents     []SubAgent
@@ -103,6 +103,8 @@ type Model struct {
 	cmdCursor     int
 	cmdPage       int
 }
+
+func (m Model) MultiAgent() bool { return m.multiAgent != nil && *m.multiAgent }
 
 type (
 	ServerStartedMsg      = commands.ServerStartedMsg
@@ -145,7 +147,7 @@ func IntialModel() Model {
 		termHeight:         24,
 		mode:               modeInsert,
 		permissionMsgIndex: -1,
-		multiAgent:         false,
+		multiAgent:         new(bool),
 		subAgents:          []SubAgent{},
 		agentSessions:      map[string]int{},
 		debatePhase:        "",

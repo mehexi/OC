@@ -54,7 +54,7 @@ func RenderSplash(m Model) string {
 	var infoLines []string
 	if m.healthStatus != nil && m.healthStatus.Healthy {
 		infoLines = append(infoLines, lipgloss.NewStyle().Foreground(greenColor).Render("● Connected  v"+m.healthStatus.Version))
-		if m.multiAgent {
+		if m.multiAgent != nil && *m.multiAgent {
 			infoLines = append(infoLines, lipgloss.NewStyle().Foreground(orangeColor).Render("⚡ multi-agent"))
 		}
 		if m.modelName != "" {

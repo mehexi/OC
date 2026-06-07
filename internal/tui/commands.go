@@ -64,7 +64,9 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 			return LoadSessionMsg{Session: s}
 		}
 	case "/multiagent":
-		m.multiAgent = !m.multiAgent
+		if m.multiAgent != nil {
+			*m.multiAgent = !*m.multiAgent
+		}
 		return m, commands.SendChat(m.client, m.sessionId, sysprompt.JudgeSysPrompt())
 	default:
 		return m, commands.AddAssistantMsg("Unknown: " + parts[0] + "\nTry /help for available commands.")

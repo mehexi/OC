@@ -106,6 +106,8 @@ func CreateSession(id, title string) error {
 	return writeIndex(idx)
 }
 
+
+
 func AppendMessage(sessionID, role, content string) error {
 	p, err := sessionFile(sessionID)
 	if err != nil {
