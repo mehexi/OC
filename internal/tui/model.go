@@ -26,6 +26,7 @@ const (
 	modeSession
 	modeCmd
 	modePerm
+	modeModel
 )
 
 type cmdItem struct {
@@ -71,8 +72,8 @@ type Model struct {
 
 	// Multi-agent debate state
 	subAgents     []SubAgent
-	agentSessions map[string]int  // sessionID -> subAgent index
-	debatePhase   string          // "" | "judging" | "spawning" | "debate" | "synthesis"
+	agentSessions map[string]int // sessionID -> subAgent index
+	debatePhase   string         // "" | "judging" | "spawning" | "debate" | "synthesis"
 	debateRound   int
 	debateTask    string
 
@@ -83,7 +84,9 @@ type Model struct {
 	healthChecked bool
 	healthStatus  *api.HealthResponse
 	healthErr     error
-	modelName     string
+	modelName      string
+	modelID        string
+	modelProviderID string
 	tokensUsed    int
 	contextLimit  int
 	currentPath   string
@@ -102,28 +105,31 @@ type Model struct {
 	sessionCursor int
 	cmdCursor     int
 	cmdPage       int
+	models        []api.ModelList
+	modelCursor   int
+	modelPage     int
 }
 
 func (m Model) MultiAgent() bool { return m.multiAgent != nil && *m.multiAgent }
 
 type (
-	ServerStartedMsg      = commands.ServerStartedMsg
-	ServerErrMsg          = commands.ServerErrMsg
-	HealthCheckMsg        = commands.HealthCheckMsg
-	ChatResponseMsg       = commands.ChatResponseMsg
-	ChatStreamMsg         = commands.ChatStreamMsg
-	ControlRequestMsg     = commands.ControlRequestMsg
-	PermissionRequestMsg  = commands.PermissionRequestMsg
-	LoadSessionMsg        = commands.LoadSessionMsg
-	ProvidersInfoMsg      = commands.ProvidersInfoMsg
-	PathMsg               = commands.PathMsg
-	SessionUsageMsg       = commands.SessionUsageMsg
-	ShowSessionListMsg    = commands.ShowSessionListMsg
-	MultiAgentPlanMsg     = commands.MultiAgentPlanMsg
-	SubAgentSpawnedMsg    = commands.SubAgentSpawnedMsg
-	SubAgentDoneMsg       = commands.SubAgentDoneMsg
+	ServerStartedMsg       = commands.ServerStartedMsg
+	ServerErrMsg           = commands.ServerErrMsg
+	HealthCheckMsg         = commands.HealthCheckMsg
+	ChatResponseMsg        = commands.ChatResponseMsg
+	ChatStreamMsg          = commands.ChatStreamMsg
+	ControlRequestMsg      = commands.ControlRequestMsg
+	PermissionRequestMsg   = commands.PermissionRequestMsg
+	LoadSessionMsg         = commands.LoadSessionMsg
+	ProvidersInfoMsg       = commands.ProvidersInfoMsg
+	PathMsg                = commands.PathMsg
+	SessionUsageMsg        = commands.SessionUsageMsg
+	ShowSessionListMsg     = commands.ShowSessionListMsg
+	MultiAgentPlanMsg      = commands.MultiAgentPlanMsg
+	SubAgentSpawnedMsg     = commands.SubAgentSpawnedMsg
+	SubAgentDoneMsg        = commands.SubAgentDoneMsg
 	DebateRoundCompleteMsg = commands.DebateRoundCompleteMsg
-	DebateCompleteMsg     = commands.DebateCompleteMsg
+	DebateCompleteMsg      = commands.DebateCompleteMsg
 )
 
 func IntialModel() Model {

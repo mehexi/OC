@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"oc/internal/api"
 	"oc/internal/history"
 	"oc/internal/server"
 	"oc/internal/tui/commands"
@@ -77,7 +78,7 @@ func (m Model) onNormalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 					m.sessionId = ""
 					m.messages = nil
 					m = m.refreshMessages()
-					return m, 	commands.AddAssistantMsg("Started a new session.")
+					return m, commands.AddAssistantMsg("Started a new session.")
 				}
 				return m.handleCommand(input)
 			}
@@ -128,7 +129,7 @@ func (m Model) onInsertKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 					m.sessionId = ""
 					m.messages = nil
 					m = m.refreshMessages()
-					return m, 	commands.AddAssistantMsg("Started a new session.")
+					return m, commands.AddAssistantMsg("Started a new session.")
 				}
 				if input == "/" {
 					return m.showCmdList(), nil
@@ -402,10 +403,103 @@ var cmdList = []cmdItem{
 	{Name: "/session new", Category: "history", Description: "Start a fresh session"},
 	{Name: "/clear", Category: "chat", Description: "Clear chat messages"},
 	{Name: "/multiagent", Category: "Agent", Description: "Toggle multi-agent mode — spawns sub-agents that work on tasks in parallel to solve complex problems faster"},
+	{Name: "/model", Category: "model", Description: "Toogle between models"},
 	{Name: "/retry", Category: "chat", Description: "Re-send last user message"},
 	{Name: "/load <n>", Category: "history", Description: "Load session by number"},
 	{Name: "/tokens", Category: "info", Description: "Show token usage"},
 	{Name: "/exit", Category: "exit", Description: "Quit the app"},
+}
+
+func filteredModelList(m Model) []api.ModelList {
+	input := m.inputText.Value()
+	if input == "" {
+		return m.models
+	}
+	var result []api.ModelList
+	for _, model := range m.models {
+		if strings.Contains(strings.ToLower(model.Name), strings.ToLower(input)) {
+			result = append(result, model)
+		}
+	}
+	return result
+}
+
+func (m Model) showModelList() Model {
+	m.modelCursor = 0
+	m.modelPage = 0
+	m.mode = modeModel
+	m.inputText.Focus()
+	return m.syncLayout()
+}
+
+func (m Model) onModelKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
+	models := filteredModelList(m)
+	const itemsPerPage = 5
+	total := len(models)
+	totalPages := (total + itemsPerPage - 1) / itemsPerPage
+	itemsOnPage := itemsPerPage
+	start := m.modelPage * itemsPerPage
+	if end := start + itemsPerPage; end > total {
+		itemsOnPage = total - start
+	}
+
+	switch msg.String() {
+	case "j", "down":
+		if m.modelCursor < itemsOnPage-1 {
+			m.modelCursor++
+		} else if m.modelPage < totalPages-1 {
+			m.modelPage++
+			m.modelCursor = 0
+		}
+		return m, nil
+	case "k", "up":
+		if m.modelCursor > 0 {
+			m.modelCursor--
+		} else if m.modelPage > 0 {
+			m.modelPage--
+			itemsOnPrev := itemsPerPage
+			if end := m.modelPage*itemsPerPage + itemsPerPage; end > total {
+				itemsOnPrev = total - m.modelPage*itemsPerPage
+			}
+			m.modelCursor = itemsOnPrev - 1
+		}
+		return m, nil
+	case "esc", "ctrl+c":
+		m.mode = modeInsert
+		m.inputText.Focus()
+		return m.syncLayout(), nil
+	case "enter":
+		if total > 0 {
+			idx := m.modelPage*itemsPerPage + m.modelCursor
+			if idx < total {
+				selected := models[idx]
+				m.modelName = selected.Name
+				m.modelID = selected.ID
+				m.modelProviderID = selected.ProviderID
+				m.client.ModelID = selected.ID
+				m.client.ModelProviderID = selected.ProviderID
+				if m.sessionId != "" {
+					m.sessionId = ""
+				}
+				m.mode = modeInsert
+				m.inputText.Focus()
+				m.inputText.SetValue("")
+				return m.syncLayout(), func() tea.Msg {
+					m.client.SetModel(selected.ID)
+					return nil
+				}
+			}
+		}
+		return m, nil
+	default:
+		var cmd tea.Cmd
+		m.inputText, cmd = m.inputText.Update(msg)
+		var vpCmd tea.Cmd
+		m.viewPort, vpCmd = m.viewPort.Update(msg)
+		m.modelPage = 0
+		m.modelCursor = 0
+		return m.syncLayout(), tea.Batch(cmd, vpCmd)
+	}
 }
 
 func (m Model) showCmdList() Model {
@@ -480,7 +574,7 @@ func (m Model) onCmdKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		}
 		m.cmdPage = 0
 		m.cmdCursor = 0
-		return m, tea.Batch(cmd, vpCmd)
+		return m.syncLayout(), tea.Batch(cmd, vpCmd)
 	}
 }
 
@@ -497,16 +591,16 @@ func (m Model) executeCommand(input string) (Model, tea.Cmd) {
 		m.sessionId = ""
 		m.messages = nil
 		m = m.refreshMessages()
-		return m, 	commands.AddAssistantMsg("Started a new session.")
+		return m, commands.AddAssistantMsg("Started a new session.")
 
 	case parts[0] == "/clear":
 		m.messages = nil
 		m = m.refreshMessages()
-		return m, 	commands.AddAssistantMsg("Chat cleared.")
+		return m, commands.AddAssistantMsg("Chat cleared.")
 
 	case parts[0] == "/retry":
 		if len(m.messages) == 0 {
-			return m, 	commands.AddAssistantMsg("Nothing to retry.")
+			return m, commands.AddAssistantMsg("Nothing to retry.")
 		}
 		lastUserIdx := -1
 		for i := len(m.messages) - 1; i >= 0; i-- {
@@ -516,7 +610,7 @@ func (m Model) executeCommand(input string) (Model, tea.Cmd) {
 			}
 		}
 		if lastUserIdx == -1 {
-			return m, 	commands.AddAssistantMsg("No user message to retry.")
+			return m, commands.AddAssistantMsg("No user message to retry.")
 		}
 		lastInput := m.messages[lastUserIdx].Content
 		m.messages = m.messages[:lastUserIdx+1]

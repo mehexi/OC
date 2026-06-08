@@ -34,7 +34,6 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 
 	case "/sessions":
 		return m, commands.ShowSessionListCmd()
-
 	case "/tokens":
 		usage := fmt.Sprintf("Model: %s  |  Tokens: %d / %d  |  Remaining: %d",
 			m.modelName, m.tokensUsed, m.contextLimit, m.contextLimit-m.tokensUsed)
@@ -63,6 +62,8 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 			}
 			return LoadSessionMsg{Session: s}
 		}
+	case "/model":
+		return m.showModelList(), nil
 	case "/multiagent":
 		if m.multiAgent != nil {
 			*m.multiAgent = !*m.multiAgent

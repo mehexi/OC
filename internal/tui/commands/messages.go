@@ -51,6 +51,7 @@ type LoadSessionMsg struct {
 
 type ProvidersInfoMsg struct {
 	ModelName string
+	Models    []api.ModelList
 	Err       error
 }
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"oc/internal/api"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -17,61 +18,67 @@ type multiAgentProvider interface {
 
 func StartSSEListener(client *api.Client, program *tea.Program, provider multiAgentProvider) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		resp, err := client.SubscribeGlobalEvents(ctx)
-		if err != nil {
-			return ControlRequestMsg{Err: err}
-		}
-		defer resp.Body.Close()
-
-		partTypes := make(map[string]string)
-		bufferedDeltas := make(map[string][]string)
-
-		reader := bufio.NewReader(resp.Body)
 		for {
-			line, err := reader.ReadString('\n')
-			if err != nil {
-				return nil
-			}
-			line = strings.TrimSpace(line)
-			if !strings.HasPrefix(line, "data: ") {
-				continue
-			}
-			data := strings.TrimPrefix(line, "data: ")
-
-			var msg api.SSEMessage
-			if err := json.Unmarshal([]byte(data), &msg); err != nil {
-				continue
-			}
-
-			if msg.Payload.Type == "session.status" {
-				var props struct {
-					SessionID string `json:"sessionID"`
-					Status    struct {
-						Type   string `json:"type"`
-						Action *struct {
-							Title string `json:"title"`
-							Link  string `json:"link"`
-						} `json:"action"`
-					} `json:"status"`
+			func() {
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				resp, err := client.SubscribeGlobalEvents(ctx)
+				if err != nil {
+					program.Send(ControlRequestMsg{Err: err})
+					return
 				}
-				if err := json.Unmarshal(msg.Payload.Properties, &props); err == nil {
-					if props.Status.Type == "retry" && props.Status.Action != nil {
-						program.Send(ChatStreamMsg{
-							Done: true,
-							Err:  fmt.Errorf("%s — %s", props.Status.Action.Title, props.Status.Action.Link),
-						})
+				defer resp.Body.Close()
+
+				partTypes := make(map[string]string)
+				bufferedDeltas := make(map[string][]string)
+
+				reader := bufio.NewReader(resp.Body)
+				for {
+					line, err := reader.ReadString('\n')
+					if err != nil {
+						time.Sleep(1 * time.Second)
+						return
 					}
-				}
-				continue
-			}
-			if provider.MultiAgent() {
-				handleMultiAgentPlan(msg, program)
-			} else {
-				handleSSEEvent(msg, program, partTypes, bufferedDeltas)
-			}
+					line = strings.TrimSpace(line)
+					if !strings.HasPrefix(line, "data: ") {
+						continue
+					}
+					data := strings.TrimPrefix(line, "data: ")
 
+					var msg api.SSEMessage
+					if err := json.Unmarshal([]byte(data), &msg); err != nil {
+						continue
+					}
+
+					if msg.Payload.Type == "session.status" {
+						var props struct {
+							SessionID string `json:"sessionID"`
+							Status    struct {
+								Type   string `json:"type"`
+								Action *struct {
+									Title string `json:"title"`
+									Link  string `json:"link"`
+								} `json:"action"`
+							} `json:"status"`
+						}
+						if err := json.Unmarshal(msg.Payload.Properties, &props); err == nil {
+							if props.Status.Type == "retry" && props.Status.Action != nil {
+								program.Send(ChatStreamMsg{
+									Done: true,
+									Err:  fmt.Errorf("%s — %s", props.Status.Action.Title, props.Status.Action.Link),
+								})
+							}
+						}
+						continue
+					}
+					if provider.MultiAgent() {
+						handleMultiAgentPlan(msg, program)
+					} else {
+						handleSSEEvent(msg, program, partTypes, bufferedDeltas)
+					}
+
+				}
+			}()
 		}
 	}
 }
@@ -204,6 +211,28 @@ func handleSSEEvent(msg api.SSEMessage, program *tea.Program, partTypes map[stri
 			}
 		}
 
+	case "session.error":
+		var props struct {
+			SessionID string `json:"sessionID"`
+			Error     struct {
+				Name string `json:"name"`
+				Data struct {
+					Message    string `json:"message"`
+					StatusCode int    `json:"statusCode"`
+				} `json:"data"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(msg.Payload.Properties, &props); err != nil {
+			return
+		}
+		if props.Error.Data.StatusCode >= 400 && program != nil {
+			program.Send(ChatStreamMsg{
+				SessionID: props.SessionID,
+				Done:      true,
+				Err:       fmt.Errorf("%s", props.Error.Data.Message),
+			})
+		}
+
 	case "message.updated":
 		var props struct {
 			SessionID     string   `json:"sessionID"`
@@ -216,18 +245,27 @@ func handleSSEEvent(msg api.SSEMessage, program *tea.Program, partTypes map[stri
 				Role    string `json:"role"`
 				Finish  string `json:"finish,omitempty"`
 				ModelID string `json:"modelID,omitempty"`
+				Error   *struct {
+					Name string `json:"name"`
+					Data struct {
+						Message    string `json:"message"`
+						StatusCode int    `json:"statusCode"`
+					} `json:"data"`
+				} `json:"error"`
 			} `json:"info"`
 		}
 		if err := json.Unmarshal(msg.Payload.Properties, &props); err != nil {
 			return
 		}
 
-		if props.Info.Role == "assistant" && props.Info.Finish != "" && program != nil {
-			program.Send(ChatStreamMsg{
-				SessionID: props.SessionID,
-				Done:      true,
-				ModelName: props.Info.ModelID,
-			})
+		if props.Info.Role == "assistant" && program != nil {
+			if props.Info.Finish != "" {
+				program.Send(ChatStreamMsg{
+					SessionID: props.SessionID,
+					Done:      true,
+					ModelName: props.Info.ModelID,
+				})
+			}
 		}
 	}
 }

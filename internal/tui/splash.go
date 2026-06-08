@@ -14,40 +14,18 @@ func compactSplash(m Model) string {
 	} else {
 		status = lipgloss.NewStyle().Foreground(orangeColor).Render("● Connecting...")
 	}
-	return lipgloss.JoinVertical(lipgloss.Left,
-		modeTag(m),
-		lipgloss.NewStyle().Width(m.width).Padding(0, 2).Render(status),
-	)
-}
 
-func modeTag(m Model) string {
-	label := "  NORMAL  "
-	fg := lipgloss.Color("#888888")
-
-	switch m.mode {
-	case modeInsert:
-		label = "  INSERT"
-		fg = cyanColor
-	case modeVisual:
-		label = "  VISUAL  "
-		fg = orangeColor
-	case modeQus:
-		label = "  QUESTION  "
-		fg = greenColor
-	case modeSession:
-		label = "  SESSIONS  "
-		fg = cyanColor
-	case modeCmd:
-		label = "  COMMANDS  "
-		fg = cyanColor
+	info := status
+	if m.modelName != "" {
+		info = lipgloss.JoinHorizontal(lipgloss.Center, status, "  ", lipgloss.NewStyle().Foreground(whiteColor).Render(m.modelName))
 	}
 
 	return lipgloss.NewStyle().
-		Foreground(fg).
 		Width(m.width).
+		Padding(0, 2).
 		Border(lipgloss.NormalBorder()).
 		BorderBottom(true).BorderLeft(false).BorderRight(false).BorderTop(false).
-		Render(label)
+		Render(info)
 }
 
 func RenderSplash(m Model) string {

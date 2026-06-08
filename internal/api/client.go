@@ -20,6 +20,9 @@ type Client struct {
 	LogFile    string
 	Directory  string
 	mu         sync.Mutex
+
+	ModelID        string
+	ModelProviderID string
 }
 
 type HealthResponse struct {
@@ -29,6 +32,14 @@ type HealthResponse struct {
 
 type sessionResponse struct {
 	ID string `json:"id"`
+}
+
+type ModelList struct {
+	ID         string  `json:"id"`
+	ProviderID string  `json:"providerID"`
+	Name       string  `json:"name"`
+	CostInput  float64 `json:"-"`
+	CostOutput float64 `json:"-"`
 }
 
 type sendMessageRequest struct {
@@ -214,6 +225,27 @@ func New(baseURL string) *Client {
 	return &Client{baseURL: baseURL, httpClient: &http.Client{Transport: transport}}
 }
 
+func (c *Client) SetModel(id string) error {
+	b, _ := json.Marshal(map[string]string{"model": id})
+	req, err := http.NewRequest("PATCH", c.baseURL+"/config", bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.Directory != "" {
+		req.Header.Set("x-opencode-directory", c.Directory)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("set model: unexpected status %d", resp.StatusCode)
+	}
+	return nil
+}
+
 func (c *Client) GetProviders() (*ProvidersResponse, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -297,7 +329,14 @@ func (c *Client) GetSession(id string) (map[string]any, error) {
 }
 
 func (c *Client) CreateSession(title string) (string, error) {
-	body, _ := json.Marshal(map[string]string{"title": title})
+	bodyMap := map[string]any{"title": title}
+	if c.ModelID != "" && c.ModelProviderID != "" {
+		bodyMap["model"] = map[string]string{
+			"id":         c.ModelID,
+			"providerID": c.ModelProviderID,
+		}
+	}
+	body, _ := json.Marshal(bodyMap)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/session", bytes.NewReader(body))
@@ -399,3 +438,5 @@ func (c *Client) Health() (*HealthResponse, error) {
 
 	return &result, nil
 }
+
+

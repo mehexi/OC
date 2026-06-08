@@ -58,10 +58,21 @@ func (m Model) onHealthCheck(msg HealthCheckMsg) (Model, tea.Cmd) {
 	return m.refreshMessages(), nil
 }
 
-// onProvidersInfo stores the default model name.
+// onProvidersInfo stores the default model name and model list.
 func (m Model) onProvidersInfo(msg ProvidersInfoMsg) (Model, tea.Cmd) {
 	if msg.Err == nil {
 		m.modelName = msg.ModelName
+		m.models = msg.Models
+		for _, model := range msg.Models {
+			if model.ID == msg.ModelName {
+				m.modelID = model.ID
+				m.modelProviderID = model.ProviderID
+				m.modelName = model.Name
+				m.client.ModelID = model.ID
+				m.client.ModelProviderID = model.ProviderID
+				break
+			}
+		}
 	}
 	return m, nil
 }
@@ -81,9 +92,6 @@ func (m Model) onSessionUsage(msg SessionUsageMsg) (Model, tea.Cmd) {
 	if msg.Err == nil {
 		m.tokensUsed = msg.TokensUsed
 		m.contextLimit = msg.ContextLimit
-		if msg.ModelName != "" {
-			m.modelName = msg.ModelName
-		}
 	}
 	return m, nil
 }
@@ -190,12 +198,13 @@ func (m Model) onStreamMsg(msg ChatStreamMsg) (Model, tea.Cmd) {
 		return m.refreshMessages(), nil
 	}
 
-	// First message carries the session ID — persist user message
-	if msg.SessionID != "" && m.sessionId == "" {
+	// Session-ID-only message (no text/reasoning/done) — session was created, wait for SSE
+	if msg.SessionID != "" && m.sessionId == "" && msg.Text == "" && msg.Reasoning == "" && !msg.Done {
 		m.sessionId = msg.SessionID
 		if len(m.messages) > 0 {
 			history.AppendMessage(m.sessionId, "user", m.messages[len(m.messages)-1].Content)
 		}
+		return m, nil
 	}
 
 	if msg.Done {
@@ -203,9 +212,6 @@ func (m Model) onStreamMsg(msg ChatStreamMsg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		m.streaming = false
-		if msg.ModelName != "" {
-			m.modelName = msg.ModelName
-		}
 		if msg.FullReasoning != "" {
 			for i := len(m.messages) - 1; i >= 0; i-- {
 				if m.messages[i].Role == "assistant" {
@@ -260,9 +266,6 @@ func (m Model) onChatResponse(msg ChatResponseMsg) (Model, tea.Cmd) {
 			if isNew {
 				history.AppendMessage(msg.SessionID, "user", m.messages[len(m.messages)-1].Content)
 			}
-		}
-		if msg.ModelName != "" {
-			m.modelName = msg.ModelName
 		}
 		m.messages = append(m.messages, ChatMessage{Role: "assistant", Content: msg.Response})
 		if m.sessionId != "" {
@@ -322,6 +325,15 @@ func (m Model) viewportHeight() int {
 			cmdLines += 2
 		}
 		available -= cmdLines
+	case modeModel:
+		models := filteredModelList(m)
+		modelLines := 2 + 5
+		total := len(models)
+		totalPages := (total + 5 - 1) / 5
+		if totalPages > 1 {
+			modelLines += 2
+		}
+		available -= modelLines
 	}
 	if available < 1 {
 		available = 1
@@ -359,6 +371,8 @@ func (m Model) onKeyPress(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m.onSessionKey(msg)
 	case modeCmd:
 		return m.onCmdKey(msg)
+	case modeModel:
+		return m.onModelKey(msg)
 	case modePerm:
 		return m.onPermKey(msg)
 	default:

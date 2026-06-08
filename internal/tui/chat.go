@@ -9,6 +9,49 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
+func renderModelView(m Model) string {
+	if len(m.models) == 0 {
+		return "Loading models..."
+	}
+	const itemsPerPage = 5
+	models := filteredModelList(m)
+	total := len(models)
+	totalPages := (total + itemsPerPage - 1) / itemsPerPage
+	start := m.modelPage * itemsPerPage
+
+	var lines []string
+	lines = append(lines, fmt.Sprintf("%d models", total))
+	lines = append(lines, strings.Repeat("-", 10))
+
+	for i := range itemsPerPage {
+		idx := start + i
+		if idx >= total {
+			lines = append(lines, "")
+			continue
+		}
+		item := models[idx]
+		prefix := "  "
+		style := lipgloss.NewStyle()
+		if i == m.modelCursor {
+			prefix = "> "
+			style = lipgloss.NewStyle().Foreground(orangeColor)
+		}
+		costStr := ""
+		if item.CostInput > 0 || item.CostOutput > 0 {
+			costStr = fmt.Sprintf(" $%.2f/%.2f", item.CostInput, item.CostOutput)
+		}
+		line := fmt.Sprintf("%s%-27s (%s)%s", prefix, item.Name, item.ProviderID, costStr)
+		lines = append(lines, style.Render(line))
+	}
+
+	if totalPages > 1 {
+		lines = append(lines, "")
+		lines = append(lines, fmt.Sprintf("Page %d/%d", m.modelPage+1, totalPages))
+	}
+
+	return strings.Join(lines, "\n")
+}
+
 func (m Model) renderHeader() string {
 	switch m.mode {
 	case modeQus, modeSession, modeCmd:
@@ -45,6 +88,12 @@ func ChatView(m Model) tea.View {
 			lipgloss.Top,
 			m.viewPort.View(),
 			renderCmdView(m),
+		)
+	case modeModel:
+		body = lipgloss.JoinVertical(
+			lipgloss.Top,
+			m.viewPort.View(),
+			renderModelView(m),
 		)
 	default:
 		body = m.viewPort.View()
