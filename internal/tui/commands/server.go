@@ -1,7 +1,9 @@
 package commands
 
 import (
+	"encoding/json"
 	"oc/internal/api"
+	"os"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -29,16 +31,6 @@ func FetchProviders(client *api.Client) tea.Cmd {
 		if err != nil {
 			return ProvidersInfoMsg{Err: err}
 		}
-		modelName := ""
-		if v, ok := resp.Default["opencode"]; ok {
-			modelName = v
-		} else if len(resp.Default) > 0 {
-			for _, v := range resp.Default {
-				modelName = v
-				break
-			}
-		}
-
 		var models []api.ModelList
 		for _, provider := range resp.Providers {
 			providerID, _ := provider["id"].(string)
@@ -56,6 +48,40 @@ func FetchProviders(client *api.Client) tea.Cmd {
 					ml.CostOutput, _ = costObj["output"].(float64)
 				}
 				models = append(models, ml)
+			}
+		}
+
+		modelName := ""
+		if raw, err := os.ReadFile("config.json"); err == nil {
+			var cfg struct {
+				Model string `json:"model"`
+			}
+			if json.Unmarshal(raw, &cfg) == nil && cfg.Model != "" {
+				for _, m := range models {
+					if m.ID == cfg.Model {
+						modelName = cfg.Model
+						break
+					}
+				}
+			}
+		}
+		if modelName == "" {
+			for _, v := range resp.Default {
+				for _, m := range models {
+					if m.ID == v {
+						modelName = v
+						break
+					}
+				}
+				if modelName != "" {
+					break
+				}
+			}
+			if modelName == "" && len(resp.Default) > 0 {
+				for _, v := range resp.Default {
+					modelName = v
+					break
+				}
 			}
 		}
 
