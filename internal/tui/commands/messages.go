@@ -72,6 +72,7 @@ type ShowSessionListMsg struct{}
 type MultiAgentPlanMsg struct {
 	SessionID     string
 	Task          string
+	MultiAgent    bool
 	Agents        int
 	Personalities []string
 	Complexity    string

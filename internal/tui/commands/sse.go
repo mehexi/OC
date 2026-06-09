@@ -83,26 +83,29 @@ func StartSSEListener(client *api.Client, program *tea.Program, provider multiAg
 	}
 }
 
-func handleMultiAgentPlan(msg api.SSEMessage, program *tea.Program) {
+type multiAgentProperties struct {
+	SessionID string `json:"sessionID"`
+	Part      struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+		Time struct {
+			End int64 `json:"end"`
+		} `json:"time"`
+	} `json:"part"`
+}
+
+func handleMultiAgentPlan(msg api.SSEMessage, program *tea.Program) bool {
 	if msg.Payload.Type != "message.part.updated" {
-		return
+		return false
 	}
 
-	var props struct {
-		Part struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-			Time struct {
-				End int64 `json:"end"`
-			} `json:"time"`
-		} `json:"part"`
-	}
+	var props multiAgentProperties
 	if err := json.Unmarshal(msg.Payload.Properties, &props); err != nil {
-		return
+		return false
 	}
 
 	if props.Part.Type != "text" || props.Part.Time.End == 0 {
-		return
+		return false
 	}
 
 	var verdict struct {
@@ -112,16 +115,23 @@ func handleMultiAgentPlan(msg api.SSEMessage, program *tea.Program) {
 		Complexity    string   `json:"complexity"`
 		Reason        string   `json:"reason"`
 	}
+
 	if err := json.Unmarshal([]byte(props.Part.Text), &verdict); err != nil {
 		program.Send(MultiAgentPlanMsg{
 			Reason: props.Part.Text,
 		})
-		return
+		return true
 	}
 
 	program.Send(MultiAgentPlanMsg{
-		Reason: verdict.Reason,
+		Reason:        verdict.Reason,
+		MultiAgent:    verdict.MultiAgent,
+		Agents:        verdict.Agents,
+		Personalities: verdict.Personalities,
+		Complexity:    verdict.Complexity,
 	})
+
+	return true
 }
 
 func handleSSEEvent(msg api.SSEMessage, program *tea.Program, partTypes map[string]string, bufferedDeltas map[string][]string) {

@@ -40,10 +40,21 @@ type qusItem struct {
 }
 
 type ChatMessage struct {
-	Role      string
+	Role      MessageRole
 	Content   string
 	Reasoning string
 }
+
+type MessageRole string
+
+const (
+	RoleUser       MessageRole = "user"
+	RoleAssistant  MessageRole = "assistant"
+	RoleJudge      MessageRole = "judge"
+	RolePermission MessageRole = "permission"
+	RoleSystem     MessageRole = "system"
+	RoleSubAgent   MessageRole = "subagent"
+)
 
 type SubAgent struct {
 	ID          string
@@ -78,18 +89,18 @@ type Model struct {
 	debateTask    string
 
 	// TIPS:: serevr and stuff
-	serverAddr    string
-	serverErr     error
-	client        *api.Client
-	healthChecked bool
-	healthStatus  *api.HealthResponse
-	healthErr     error
-	modelName      string
-	modelID        string
+	serverAddr      string
+	serverErr       error
+	client          *api.Client
+	healthChecked   bool
+	healthStatus    *api.HealthResponse
+	healthErr       error
+	modelName       string
+	modelID         string
 	modelProviderID string
-	tokensUsed    int
-	contextLimit  int
-	currentPath   string
+	tokensUsed      int
+	contextLimit    int
+	currentPath     string
 
 	// TIP: modes and stuff
 	mode          VimMode

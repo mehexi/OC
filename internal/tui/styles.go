@@ -3,12 +3,12 @@ package tui
 import "charm.land/lipgloss/v2"
 
 var (
-	bgColor        = lipgloss.Color("#0d1b2a")
-	cyanColor      = lipgloss.Color("#00bcd4")
-	orangeColor    = lipgloss.Color("#ff8c42")
-	greenColor     = lipgloss.Color("#4caf50")
-	mutedColor     = lipgloss.Color("#888888")
-	whiteColor     = lipgloss.Color("#e0e0e0")
-	chatBgColor    = lipgloss.Color("#082c4e")
-	selectBgColor  = lipgloss.Color("#1a3a5c")
+	bgColor       = lipgloss.Color("#0d1117")
+	cyanColor     = lipgloss.Color("#4a9ead")
+	orangeColor   = lipgloss.Color("#c47a3a")
+	greenColor    = lipgloss.Color("#4a7c59")
+	mutedColor    = lipgloss.Color("#606670")
+	whiteColor    = lipgloss.Color("#b0b8c1")
+	chatBgColor   = lipgloss.Color("#0d1f2d")
+	selectBgColor = lipgloss.Color("#162333")
 )

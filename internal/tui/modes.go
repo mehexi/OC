@@ -82,9 +82,9 @@ func (m Model) onNormalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 				}
 				return m.handleCommand(input)
 			}
-			m.messages = append(m.messages, ChatMessage{Role: "user", Content: input})
+			m.messages = append(m.messages, ChatMessage{Role: RoleUser, Content: input})
 			if m.sessionId != "" {
-				history.AppendMessage(m.sessionId, "user", input)
+				history.AppendMessage(m.sessionId, string(RoleUser), input)
 			}
 			m = m.refreshMessages()
 			m.inputText.SetValue("")
@@ -136,9 +136,9 @@ func (m Model) onInsertKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 				}
 				return m.handleCommand(input)
 			}
-			m.messages = append(m.messages, ChatMessage{Role: "user", Content: input})
+			m.messages = append(m.messages, ChatMessage{Role: RoleUser, Content: input})
 			if m.sessionId != "" {
-				history.AppendMessage(m.sessionId, "user", input)
+				history.AppendMessage(m.sessionId, string(RoleUser), input)
 			}
 			m = m.refreshMessages()
 			m.inputText.SetValue("")
@@ -247,7 +247,7 @@ func (m Model) handleQusAnswer() (Model, tea.Cmd) {
 	answer := m.qusItems[m.qusCursor].label
 
 	m.questionAnswers = append(m.questionAnswers, answer)
-	m.messages = append(m.messages, ChatMessage{Role: "user", Content: answer})
+	m.messages = append(m.messages, ChatMessage{Role: RoleUser, Content: answer})
 	m = m.refreshMessages()
 
 	m.currentQuestionIdx++
@@ -277,7 +277,7 @@ func (m Model) handleQusCancel() (Model, tea.Cmd) {
 	m.inputText.Focus()
 	m.inputText.Placeholder = "Ask anything ..."
 	m.qusHeight = 0
-	m.messages = append(m.messages, ChatMessage{Role: "assistant", Content: "Question cancelled."})
+	m.messages = append(m.messages, ChatMessage{Role: RoleAssistant, Content: "Question cancelled."})
 	m = m.refreshMessages()
 	return m.syncLayout(), nil
 }
@@ -309,7 +309,7 @@ func (m Model) onQusKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 func (m Model) showSessionList() Model {
 	sessions, err := history.ListSessions()
 	if err != nil || len(sessions) == 0 {
-		m.messages = append(m.messages, ChatMessage{Role: "assistant", Content: "No past sessions."})
+		m.messages = append(m.messages, ChatMessage{Role: RoleAssistant, Content: "No past sessions."})
 		m = m.refreshMessages()
 		return m
 	}
@@ -604,7 +604,7 @@ func (m Model) executeCommand(input string) (Model, tea.Cmd) {
 		}
 		lastUserIdx := -1
 		for i := len(m.messages) - 1; i >= 0; i-- {
-			if m.messages[i].Role == "user" {
+			if m.messages[i].Role == RoleUser {
 				lastUserIdx = i
 				break
 			}

@@ -64,11 +64,19 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 		}
 	case "/model":
 		return m.showModelList(), nil
+
 	case "/multiagent":
 		if m.multiAgent != nil {
 			*m.multiAgent = !*m.multiAgent
 		}
-		return m, commands.SendChat(m.client, m.sessionId, sysprompt.JudgeSysPrompt())
+		m.messages = append(m.messages, ChatMessage{
+			Role:    RoleSystem,
+			Content: fmt.Sprintf("Multi-agent mode: %v", *m.multiAgent),
+		})
+		if *m.multiAgent {
+			return m, commands.SendChat(m.client, m.sessionId, sysprompt.JudgeSysPrompt())
+		}
+		return m, nil
 	default:
 		return m, commands.AddAssistantMsg("Unknown: " + parts[0] + "\nTry /help for available commands.")
 	}

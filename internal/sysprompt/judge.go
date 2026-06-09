@@ -42,5 +42,6 @@ Once the task is clear, output ONLY this JSON — no planning, no implementation
 }
 
 CRITICAL: Do not attempt to solve, plan, or implement the task. Only judge it. Another agent will do the actual work.
+Output raw JSON only — no markdown, no code fences, no backticks, no json wrapper.
 `
 }
