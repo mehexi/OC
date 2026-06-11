@@ -53,17 +53,8 @@ const (
 	RoleJudge      MessageRole = "judge"
 	RolePermission MessageRole = "permission"
 	RoleSystem     MessageRole = "system"
-	RoleSubAgent   MessageRole = "subagent"
-)
 
-type SubAgent struct {
-	ID          string
-	SessionID   string
-	Personality string
-	Status      string // "spawning" | "thinking" | "done"
-	Messages    []ChatMessage
-	RoundDone   bool
-}
+)
 
 type Model struct {
 	viewPort           viewport.Model
@@ -80,13 +71,6 @@ type Model struct {
 	awaitingResponse   bool
 	width              int
 	multiAgent         *bool
-
-	// Multi-agent debate state
-	subAgents     []SubAgent
-	agentSessions map[string]int // sessionID -> subAgent index
-	debatePhase   string         // "" | "judging" | "spawning" | "debate" | "synthesis"
-	debateRound   int
-	debateTask    string
 
 	// TIPS:: serevr and stuff
 	serverAddr      string
@@ -137,10 +121,7 @@ type (
 	SessionUsageMsg        = commands.SessionUsageMsg
 	ShowSessionListMsg     = commands.ShowSessionListMsg
 	MultiAgentPlanMsg      = commands.MultiAgentPlanMsg
-	SubAgentSpawnedMsg     = commands.SubAgentSpawnedMsg
-	SubAgentDoneMsg        = commands.SubAgentDoneMsg
-	DebateRoundCompleteMsg = commands.DebateRoundCompleteMsg
-	DebateCompleteMsg      = commands.DebateCompleteMsg
+
 )
 
 func IntialModel() Model {
@@ -165,8 +146,5 @@ func IntialModel() Model {
 		mode:               modeInsert,
 		permissionMsgIndex: -1,
 		multiAgent:         new(bool),
-		subAgents:          []SubAgent{},
-		agentSessions:      map[string]int{},
-		debatePhase:        "",
 	}
 }

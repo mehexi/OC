@@ -51,8 +51,6 @@ func (m Model) onHealthCheck(msg HealthCheckMsg) (Model, tea.Cmd) {
 		m.messages = append(m.messages, ChatMessage{Role: RoleAssistant, Content: "Server error: " + msg.Err.Error()})
 	} else {
 		m.healthStatus = msg.Status
-		welcome := fmt.Sprintf("Server v%s connected. Type /sessions for history.", msg.Status.Version)
-		m.messages = append(m.messages, ChatMessage{Role: RoleAssistant, Content: welcome})
 		return m.refreshMessages(), tea.Batch(commands.FetchProviders(m.client), commands.FetchPath(m.client))
 	}
 	return m.refreshMessages(), nil

@@ -79,22 +79,4 @@ type MultiAgentPlanMsg struct {
 	Reason        string
 }
 
-type SubAgentSpawnedMsg struct {
-	AgentID     string
-	SessionID   string
-	Personality string
-	Err         error
-}
 
-type SubAgentDoneMsg struct {
-	AgentID   string
-	SessionID string
-	Content   string
-	Err       error
-}
-
-type DebateRoundCompleteMsg struct {
-	Round int
-}
-
-type DebateCompleteMsg struct{}
