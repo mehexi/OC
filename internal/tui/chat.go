@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"image/color"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -210,7 +211,6 @@ func renderSessionView(m Model) string {
 }
 
 func RenderChatBubble(msg ChatMessage, m Model) string {
-
 	tagColor := cyanColor
 	tag := "you >"
 	switch msg.Role {
@@ -221,20 +221,15 @@ func RenderChatBubble(msg ChatMessage, m Model) string {
 		tagColor = orangeColor
 		tag = "perm"
 	}
-
 	tagRendered := lipgloss.NewStyle().
 		Foreground(tagColor).
 		Render(tag)
-
 	var body string
-
 	content := msg.Content
-
 	if msg.Role == RoleSystem {
 		style := lipgloss.NewStyle().Foreground(mutedColor).Italic(true)
 		return style.Render("──── " + content + " ────")
 	}
-
 	if msg.Role == RoleJudge {
 		boxWidth := m.width - 6
 		judgeStyle := lipgloss.NewStyle().
@@ -249,6 +244,36 @@ func RenderChatBubble(msg ChatMessage, m Model) string {
 		return judgeBlock
 	}
 
+	type agentMeta struct {
+		color color.Color
+		label string
+		emoji string
+	}
+	agentRoles := map[MessageRole]agentMeta{
+		RoleSkeptic:        {lipgloss.Color("#FF6B6B"), "Skeptic", "🔍"},
+		RoleArchitect:      {lipgloss.Color("#4ECDC4"), "Architect", "🏛️"},
+		RolePragmatist:     {lipgloss.Color("#95E1D3"), "Pragmatist", "⚡"},
+		RoleSecurity:       {lipgloss.Color("#F38181"), "Security", "🔒"},
+		RoleDevilsAdvocate: {lipgloss.Color("#A8E6CF"), "Devil's Advocate", "😈"},
+		RoleResearcher:     {lipgloss.Color("#FFD93D"), "Researcher", "📚"},
+		RolePerformance:    {lipgloss.Color("#6BCB77"), "Performance", "🚀"},
+	}
+
+	if meta, isAgent := agentRoles[msg.Role]; isAgent {
+		boxWidth := m.width - 6
+		headerStyle := lipgloss.NewStyle().
+			Foreground(meta.color).
+			Bold(true)
+		bordered := lipgloss.NewStyle().
+			Border(lipgloss.NormalBorder()).
+			BorderForeground(meta.color).
+			Padding(0, 1).
+			Width(boxWidth)
+		rendered := RenderMarkdown(content)
+		agentBlock := bordered.Render(headerStyle.Render(meta.emoji+"  "+meta.label) + "\n" + rendered)
+		return agentBlock
+	}
+
 	if msg.Reasoning != "" {
 		boxWidth := m.width - 6
 		reasoningStyle := lipgloss.NewStyle().
@@ -261,7 +286,6 @@ func RenderChatBubble(msg ChatMessage, m Model) string {
 			Width(boxWidth)
 		body = bordered.Render(reasoningStyle.Render("💭 "+msg.Reasoning)) + "\n\n"
 	}
-
 	rendered := RenderMarkdown(content)
 	body += lipgloss.JoinHorizontal(lipgloss.Top, tagRendered, " ", lipgloss.NewStyle().Render(rendered))
 	return body

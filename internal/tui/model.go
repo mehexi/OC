@@ -48,12 +48,18 @@ type ChatMessage struct {
 type MessageRole string
 
 const (
-	RoleUser       MessageRole = "user"
-	RoleAssistant  MessageRole = "assistant"
-	RoleJudge      MessageRole = "judge"
-	RolePermission MessageRole = "permission"
-	RoleSystem     MessageRole = "system"
-
+	RoleUser           MessageRole = "user"
+	RoleAssistant      MessageRole = "assistant"
+	RoleJudge          MessageRole = "judge"
+	RolePermission     MessageRole = "permission"
+	RoleSystem         MessageRole = "system"
+	RoleSkeptic        MessageRole = "skeptic"
+	RoleArchitect      MessageRole = "architect"
+	RolePragmatist     MessageRole = "pragmatist"
+	RoleSecurity       MessageRole = "security"
+	RoleDevilsAdvocate MessageRole = "devil's_advocate"
+	RoleResearcher     MessageRole = "researcher"
+	RolePerformance    MessageRole = "performance"
 )
 
 type Model struct {
@@ -105,23 +111,27 @@ type Model struct {
 	modelPage     int
 }
 
+type Subagents []struct {
+	SessionID string
+	Role      string
+}
+
 func (m Model) MultiAgent() bool { return m.multiAgent != nil && *m.multiAgent }
 
 type (
-	ServerStartedMsg       = commands.ServerStartedMsg
-	ServerErrMsg           = commands.ServerErrMsg
-	HealthCheckMsg         = commands.HealthCheckMsg
-	ChatResponseMsg        = commands.ChatResponseMsg
-	ChatStreamMsg          = commands.ChatStreamMsg
-	ControlRequestMsg      = commands.ControlRequestMsg
-	PermissionRequestMsg   = commands.PermissionRequestMsg
-	LoadSessionMsg         = commands.LoadSessionMsg
-	ProvidersInfoMsg       = commands.ProvidersInfoMsg
-	PathMsg                = commands.PathMsg
-	SessionUsageMsg        = commands.SessionUsageMsg
-	ShowSessionListMsg     = commands.ShowSessionListMsg
-	MultiAgentPlanMsg      = commands.MultiAgentPlanMsg
-
+	ServerStartedMsg     = commands.ServerStartedMsg
+	ServerErrMsg         = commands.ServerErrMsg
+	HealthCheckMsg       = commands.HealthCheckMsg
+	ChatResponseMsg      = commands.ChatResponseMsg
+	ChatStreamMsg        = commands.ChatStreamMsg
+	ControlRequestMsg    = commands.ControlRequestMsg
+	PermissionRequestMsg = commands.PermissionRequestMsg
+	LoadSessionMsg       = commands.LoadSessionMsg
+	ProvidersInfoMsg     = commands.ProvidersInfoMsg
+	PathMsg              = commands.PathMsg
+	SessionUsageMsg      = commands.SessionUsageMsg
+	ShowSessionListMsg   = commands.ShowSessionListMsg
+	MultiAgentPlanMsg    = commands.MultiAgentPlanMsg
 )
 
 func IntialModel() Model {

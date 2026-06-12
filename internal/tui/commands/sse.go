@@ -95,6 +95,7 @@ type multiAgentProperties struct {
 }
 
 func handleMultiAgentPlan(msg api.SSEMessage, program *tea.Program) bool {
+
 	if msg.Payload.Type != "message.part.updated" {
 		return false
 	}
@@ -108,27 +109,23 @@ func handleMultiAgentPlan(msg api.SSEMessage, program *tea.Program) bool {
 		return false
 	}
 
-	var verdict struct {
-		MultiAgent    bool     `json:"multi_agent"`
-		Agents        int      `json:"agents"`
-		Personalities []string `json:"personalities"`
-		Complexity    string   `json:"complexity"`
-		Reason        string   `json:"reason"`
-	}
+	role := "judge"
 
-	if err := json.Unmarshal([]byte(props.Part.Text), &verdict); err != nil {
+	if props.SessionID == "ses_14283863affeiidNpP6vcHFybT" {
 		program.Send(MultiAgentPlanMsg{
-			Reason: props.Part.Text,
+			SessionID: props.SessionID,
+			Role:      "subagent",
+			Content:   "this is a msg from agent " + props.SessionID,
+			Done:      true,
 		})
 		return true
 	}
 
 	program.Send(MultiAgentPlanMsg{
-		Reason:        verdict.Reason,
-		MultiAgent:    verdict.MultiAgent,
-		Agents:        verdict.Agents,
-		Personalities: verdict.Personalities,
-		Complexity:    verdict.Complexity,
+		SessionID: props.SessionID,
+		Role:      role,
+		Content:   props.Part.Text,
+		Done:      true,
 	})
 
 	return true

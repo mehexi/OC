@@ -281,18 +281,16 @@ func (m Model) onChatResponse(msg ChatResponseMsg) (Model, tea.Cmd) {
 func (m Model) onMultiAgentPlan(msg MultiAgentPlanMsg) (Model, tea.Cmd) {
 	m.loading = false
 
-	summary := fmt.Sprintf("%s\n\nComplexity: %s | Agents: %d | Multi-agent: %v\nPersonalities: %s",
-		msg.Reason,
-		msg.Complexity,
-		msg.Agents,
-		msg.MultiAgent,
-		strings.Join(msg.Personalities, ", "),
-	)
+	role := RoleJudge
+	if msg.Role == "subagent" {
+		role = RoleResearcher
+	}
 
 	m.messages = append(m.messages, ChatMessage{
-		Role:    RoleJudge,
-		Content: summary,
+		Role:    role,
+		Content: msg.Content,
 	})
+
 	return m.refreshMessages(), nil
 }
 

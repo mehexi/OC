@@ -71,6 +71,9 @@ type ShowSessionListMsg struct{}
 
 type MultiAgentPlanMsg struct {
 	SessionID     string
+	Role          string // "judge" | "agent"
+	Content       string
+	Done          bool
 	Task          string
 	MultiAgent    bool
 	Agents        int
@@ -79,4 +82,7 @@ type MultiAgentPlanMsg struct {
 	Reason        string
 }
 
-
+type Subagents []struct {
+	SessionID string
+	Role      string
+}
