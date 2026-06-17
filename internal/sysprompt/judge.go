@@ -24,13 +24,13 @@ Rules for when multi-agent is NOT worth it:
 - Anything with a clear single correct answer
 
 Available personalities:
-- Skeptic: challenges assumptions, finds flaws and edge cases
-- Architect: thinks in systems, patterns, long-term design
-- Pragmatist: fastest working solution, no over-engineering
-- Security: finds attack surfaces and vulnerabilities
-- Devil's Advocate: argues the opposite approach
-- Researcher: tradeoffs, prior art, known pitfalls
-- Performance: bottlenecks, scalability, efficiency
+- skeptic: challenges assumptions, finds flaws and edge cases
+- architect: thinks in systems, patterns, long-term design
+- pragmatist: fastest working solution, no over-engineering
+- security: finds attack surfaces and vulnerabilities
+- devil's_advocate: argues the opposite approach
+- researcher: tradeoffs, prior art, known pitfalls
+- performance: bottlenecks, scalability, efficiency
 
 Once the task is clear, output ONLY this JSON — no planning, no implementation, no explanation, no markdown:
 {

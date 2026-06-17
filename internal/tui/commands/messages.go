@@ -69,9 +69,23 @@ type SessionUsageMsg struct {
 
 type ShowSessionListMsg struct{}
 
+type SubagentRole string
+
+const (
+	RoleJudge          SubagentRole = "judge"
+	RoleSystem         SubagentRole = "system"
+	RoleSkeptic        SubagentRole = "skeptic"
+	RoleArchitect      SubagentRole = "architect"
+	RolePragmatist     SubagentRole = "pragmatist"
+	RoleSecurity       SubagentRole = "security"
+	RoleDevilsAdvocate SubagentRole = "devil's_advocate"
+	RoleResearcher     SubagentRole = "researcher"
+	RolePerformance    SubagentRole = "performance"
+)
+
 type MultiAgentPlanMsg struct {
 	SessionID     string
-	Role          string // "judge" | "agent"
+	Role          SubagentRole
 	Content       string
 	Done          bool
 	Task          string
@@ -82,7 +96,28 @@ type MultiAgentPlanMsg struct {
 	Reason        string
 }
 
-type Subagents []struct {
+type verdict struct {
+	MultiAgent    bool     `json:"multi_agent"`
+	Agents        int      `json:"agents"`
+	Personalities []string `json:"personalities"`
+	Complexity    string   `json:"complexity"`
+	Reason        string   `json:"reason"`
+}
+
+type Subagent struct {
 	SessionID string
-	Role      string
+	Role      SubagentRole
+}
+
+type SubagentList []Subagent
+
+var Subagents SubagentList
+
+func findSubagent(sessionID string) (Subagent, bool) {
+	for _, a := range Subagents {
+		if a.SessionID == sessionID {
+			return a, true
+		}
+	}
+	return Subagent{}, false
 }

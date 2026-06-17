@@ -281,13 +281,8 @@ func (m Model) onChatResponse(msg ChatResponseMsg) (Model, tea.Cmd) {
 func (m Model) onMultiAgentPlan(msg MultiAgentPlanMsg) (Model, tea.Cmd) {
 	m.loading = false
 
-	role := RoleJudge
-	if msg.Role == "subagent" {
-		role = RoleResearcher
-	}
-
 	m.messages = append(m.messages, ChatMessage{
-		Role:    role,
+		Role:    MessageRole(msg.Role),
 		Content: msg.Content,
 	})
 

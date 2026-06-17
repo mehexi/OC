@@ -72,7 +72,7 @@ func StartSSEListener(client *api.Client, program *tea.Program, provider multiAg
 						continue
 					}
 					if provider.MultiAgent() {
-						handleMultiAgentPlan(msg, program)
+						handleMultiAgentPlan(client, msg, program)
 					} else {
 						handleSSEEvent(msg, program, partTypes, bufferedDeltas)
 					}
@@ -94,7 +94,7 @@ type multiAgentProperties struct {
 	} `json:"part"`
 }
 
-func handleMultiAgentPlan(msg api.SSEMessage, program *tea.Program) bool {
+func handleMultiAgentPlan(client *api.Client, msg api.SSEMessage, program *tea.Program) bool {
 
 	if msg.Payload.Type != "message.part.updated" {
 		return false
@@ -109,26 +109,120 @@ func handleMultiAgentPlan(msg api.SSEMessage, program *tea.Program) bool {
 		return false
 	}
 
-	role := "judge"
-
-	if props.SessionID == "ses_14283863affeiidNpP6vcHFybT" {
+	if agent, ok := findSubagent(props.SessionID); ok {
 		program.Send(MultiAgentPlanMsg{
 			SessionID: props.SessionID,
-			Role:      "subagent",
-			Content:   "this is a msg from agent " + props.SessionID,
+			Role:      agent.Role,
+			Content:   props.Part.Text,
 			Done:      true,
 		})
 		return true
 	}
 
+	var v verdict
+
+	if err := json.Unmarshal([]byte(props.Part.Text), &v); err == nil {
+		handleVerdict(client, v, props, program)
+	} else {
+
+		program.Send(MultiAgentPlanMsg{
+			SessionID: props.SessionID,
+			Role:      RoleJudge,
+			Content:   props.Part.Text,
+		})
+
+	}
+
 	program.Send(MultiAgentPlanMsg{
 		SessionID: props.SessionID,
-		Role:      role,
-		Content:   props.Part.Text,
-		Done:      true,
+		Role:      RoleJudge,
+		Content:   v.Reason,
 	})
-
 	return true
+}
+
+func handleVerdict(c *api.Client, v verdict, props multiAgentProperties, program *tea.Program) {
+
+	if v.MultiAgent {
+
+		var createdID []string
+
+		for _, p := range v.Personalities {
+			data, err := handleSubAgentCreate(c, p)
+			if err != nil {
+				program.Send(MultiAgentPlanMsg{
+					SessionID: props.SessionID,
+					Role:      RoleJudge,
+					Content:   "failed to create subagents",
+					Done:      false,
+				})
+				continue
+			}
+
+			if err := handleSubagentTask(c, data.SessionID); err != nil {
+				program.Send(MultiAgentPlanMsg{
+					SessionID: props.SessionID,
+					Role:      RoleJudge,
+					Content:   fmt.Sprintf("failed to send task to subagent: %v", err),
+					Done:      false,
+				})
+			}
+
+			createdID = append(createdID, data.SessionID)
+			Subagents = append(Subagents, data)
+		}
+
+		program.Send(MultiAgentPlanMsg{
+			SessionID: props.SessionID,
+			Role:      RoleJudge,
+			Content:   fmt.Sprintf("created agents: %s", strings.Join(createdID, ", ")),
+			Done:      true,
+		})
+	}
+}
+
+var personalityRoleMap = map[string]SubagentRole{
+	"judge":            RoleJudge,
+	"system":           RoleSystem,
+	"skeptic":          RoleSkeptic,
+	"architect":        RoleArchitect,
+	"pragmatist":       RolePragmatist,
+	"security":         RoleSecurity,
+	"devil's_advocate": RoleDevilsAdvocate,
+	"researcher":       RoleResearcher,
+	"performance":      RolePerformance,
+}
+
+func handleSubAgentCreate(client *api.Client, personality string) (Subagent, error) {
+
+	sessionID, err := client.CreateSession(personality)
+
+	if err != nil {
+		return Subagent{}, err
+	}
+
+	role, ok := personalityRoleMap[personality]
+
+	if !ok {
+		role = RoleJudge
+	}
+
+	subAgent := Subagent{
+		SessionID: sessionID,
+		Role:      role,
+	}
+
+	return subAgent, nil
+}
+
+func handleSubagentTask(c *api.Client, s string) error {
+	_, err := c.SendMessageRaw(s, "hii")
+
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func handleSSEEvent(msg api.SSEMessage, program *tea.Program, partTypes map[string]string, bufferedDeltas map[string][]string) {
@@ -141,9 +235,7 @@ func handleSSEEvent(msg api.SSEMessage, program *tea.Program, partTypes map[stri
 		if len(qp.Questions) == 0 {
 			return
 		}
-		cr := &api.ControlRequest{
-			ID:   qp.ID,
-			Type: "question.asked",
+		cr := &api.ControlRequest{ID: qp.ID, Type: "question.asked",
 			Data: api.ControlRequestData{
 				Questions: qp.Questions,
 			},
@@ -241,6 +333,7 @@ func handleSSEEvent(msg api.SSEMessage, program *tea.Program, partTypes map[stri
 		}
 
 	case "message.updated":
+
 		var props struct {
 			SessionID     string   `json:"sessionID"`
 			MultiAgent    *bool    `json:"multi_agent"`

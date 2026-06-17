@@ -21,7 +21,7 @@ type Client struct {
 	Directory  string
 	mu         sync.Mutex
 
-	ModelID        string
+	ModelID         string
 	ModelProviderID string
 }
 
@@ -438,5 +438,3 @@ func (c *Client) Health() (*HealthResponse, error) {
 
 	return &result, nil
 }
-
-
