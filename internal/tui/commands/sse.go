@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"oc/internal/api"
+	"oc/internal/sysprompt"
 	"strings"
+	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -95,89 +97,135 @@ type multiAgentProperties struct {
 }
 
 func handleMultiAgentPlan(client *api.Client, msg api.SSEMessage, program *tea.Program) bool {
+	switch msg.Payload.Type {
+	case "message.part.updated":
+		var props multiAgentProperties
+		if err := json.Unmarshal(msg.Payload.Properties, &props); err != nil {
+			return false
+		}
 
-	if msg.Payload.Type != "message.part.updated" {
-		return false
-	}
+		if props.Part.Type != "text" || props.Part.Time.End == 0 {
+			return false
+		}
 
-	var props multiAgentProperties
-	if err := json.Unmarshal(msg.Payload.Properties, &props); err != nil {
-		return false
-	}
+		if agent, ok := findSubagent(props.SessionID); ok {
+			program.Send(MultiAgentPlanMsg{
+				SessionID: props.SessionID,
+				Role:      agent.Role,
+				Content:   props.Part.Text,
+				Done:      true,
+			})
+			return true
+		}
 
-	if props.Part.Type != "text" || props.Part.Time.End == 0 {
-		return false
-	}
-
-	if agent, ok := findSubagent(props.SessionID); ok {
-		program.Send(MultiAgentPlanMsg{
-			SessionID: props.SessionID,
-			Role:      agent.Role,
-			Content:   props.Part.Text,
-			Done:      true,
-		})
+		var v verdict
+		if err := json.Unmarshal([]byte(props.Part.Text), &v); err == nil {
+			handleVerdict(client, v, props, program)
+		} else {
+			program.Send(MultiAgentPlanMsg{
+				SessionID: props.SessionID,
+				Role:      RoleJudge,
+				Content:   props.Part.Text,
+			})
+		}
 		return true
+
+	default:
+		return false
 	}
-
-	var v verdict
-
-	if err := json.Unmarshal([]byte(props.Part.Text), &v); err == nil {
-		handleVerdict(client, v, props, program)
-	} else {
-
-		program.Send(MultiAgentPlanMsg{
-			SessionID: props.SessionID,
-			Role:      RoleJudge,
-			Content:   props.Part.Text,
-		})
-
-	}
-
-	program.Send(MultiAgentPlanMsg{
-		SessionID: props.SessionID,
-		Role:      RoleJudge,
-		Content:   v.Reason,
-	})
-	return true
 }
 
 func handleVerdict(c *api.Client, v verdict, props multiAgentProperties, program *tea.Program) {
 
-	if v.MultiAgent {
+	if len(Subagents) != 0 {
+		for _, agent := range Subagents {
+			go func(a Subagent) {
+				handleSubagentTask(c, a, v.Task)
+			}(agent)
+		}
+		return
+	}
 
-		var createdID []string
+	if !v.MultiAgent {
+		return
+	}
 
-		for _, p := range v.Personalities {
-			data, err := handleSubAgentCreate(c, p)
+	program.Send(MultiAgentPlanMsg{
+		SessionID: props.SessionID,
+		Role:      RoleSystem,
+		Content:   fmt.Sprintf("creating agents: %d", len(v.Personalities)),
+		Agents:    len(v.Personalities),
+		Done:      true,
+	})
+
+	type result struct {
+		data Subagent
+		err  error
+		idx  int
+	}
+
+	results := make(chan result, len(v.Personalities))
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
+	for i, p := range v.Personalities {
+		wg.Add(1)
+		go func(idx int, personality string) {
+			defer wg.Done()
+			data, err := handleSubAgentCreate(c, personality)
 			if err != nil {
-				program.Send(MultiAgentPlanMsg{
-					SessionID: props.SessionID,
-					Role:      RoleJudge,
-					Content:   "failed to create subagents",
-					Done:      false,
-				})
-				continue
+				results <- result{err: err, idx: idx}
+				return
 			}
+			results <- result{data: data, idx: idx}
+		}(i, p)
+	}
 
-			if err := handleSubagentTask(c, data.SessionID); err != nil {
+	wg.Wait()
+	close(results)
+
+	var created []Subagent
+	for r := range results {
+		if r.err != nil {
+			program.Send(MultiAgentPlanMsg{
+				SessionID: props.SessionID,
+				Role:      RoleJudge,
+				Content:   "failed to create subagents",
+				Done:      false,
+			})
+			continue
+		}
+
+		program.Send(MultiAgentPlanMsg{
+			SessionID: props.SessionID,
+			Role:      RoleSystem,
+			Content:   fmt.Sprintf("created agent with role: %s", v.Personalities[r.idx]),
+			Done:      true,
+		})
+
+		mu.Lock()
+		Subagents = append(Subagents, r.data)
+		mu.Unlock()
+		created = append(created, r.data)
+	}
+
+	// Phase 2: send tasks to all created subagents
+	for _, agent := range created {
+		go func(a Subagent) {
+			prompt := fmt.Sprintf(
+				sysprompt.SubagentSysPrompt(sysprompt.SubagentRole(a.Role)),
+				v.Task,
+			)
+			if err := handleSubagentTask(c, a, prompt); err != nil {
 				program.Send(MultiAgentPlanMsg{
 					SessionID: props.SessionID,
 					Role:      RoleJudge,
 					Content:   fmt.Sprintf("failed to send task to subagent: %v", err),
 					Done:      false,
 				})
+				return
 			}
-
-			createdID = append(createdID, data.SessionID)
-			Subagents = append(Subagents, data)
-		}
-
-		program.Send(MultiAgentPlanMsg{
-			SessionID: props.SessionID,
-			Role:      RoleJudge,
-			Content:   fmt.Sprintf("created agents: %s", strings.Join(createdID, ", ")),
-			Done:      true,
-		})
+		}(agent)
 	}
 }
 
@@ -215,8 +263,9 @@ func handleSubAgentCreate(client *api.Client, personality string) (Subagent, err
 	return subAgent, nil
 }
 
-func handleSubagentTask(c *api.Client, s string) error {
-	_, err := c.SendMessageRaw(s, "hii")
+func handleSubagentTask(c *api.Client, s Subagent, prompt string) error {
+
+	_, err := c.SendMessageRaw(s.SessionID, prompt)
 
 	if err != nil {
 		return err

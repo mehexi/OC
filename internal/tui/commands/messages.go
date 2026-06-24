@@ -102,6 +102,7 @@ type verdict struct {
 	Personalities []string `json:"personalities"`
 	Complexity    string   `json:"complexity"`
 	Reason        string   `json:"reason"`
+	Task          string   `json:"task"`
 }
 
 type Subagent struct {

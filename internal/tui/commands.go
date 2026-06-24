@@ -36,7 +36,7 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 		return m, commands.ShowSessionListCmd()
 	case "/tokens":
 		usage := fmt.Sprintf("Model: %s  |  Tokens: %d / %d  |  Remaining: %d",
-			m.modelName, m.tokensUsed, m.contextLimit, m.contextLimit-m.tokensUsed)
+			m.Server.modelName, m.Server.tokensUsed, m.Server.contextLimit, m.Server.contextLimit-m.Server.tokensUsed)
 		return m, commands.AddAssistantMsg(usage)
 
 	case "/exit":
@@ -66,15 +66,15 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 		return m.showModelList(), nil
 
 	case "/multiagent":
-		if m.multiAgent != nil {
-			*m.multiAgent = !*m.multiAgent
+		if m.Chat.multiAgent != nil {
+			*m.Chat.multiAgent = !*m.Chat.multiAgent
 		}
-		m.messages = append(m.messages, ChatMessage{
+		m.Chat.messages = append(m.Chat.messages, ChatMessage{
 			Role:    RoleSystem,
-			Content: fmt.Sprintf("Multi-agent mode: %v", *m.multiAgent),
+			Content: fmt.Sprintf("Multi-agent mode: %v", *m.Chat.multiAgent),
 		})
-		if *m.multiAgent {
-			return m, commands.SendChat(m.client, m.sessionId, sysprompt.JudgeSysPrompt())
+		if *m.Chat.multiAgent {
+			return m, commands.SendChat(m.Server.client, m.Chat.sessionId, sysprompt.JudgeSysPrompt())
 		}
 		return m, nil
 	default:

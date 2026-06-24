@@ -13,17 +13,17 @@ import (
 
 // onServerStarted initialises the API client and triggers a health check.
 func (m Model) onServerStarted(msg ServerStartedMsg) (Model, tea.Cmd) {
-	m.serverAddr = msg.Address
-	m.client = api.New(msg.Address)
-	return m, commands.CheckHealth(m.client)
+	m.Server.serverAddr = msg.Address
+	m.Server.client = api.New(msg.Address)
+	return m, commands.CheckHealth(m.Server.client)
 }
 
 func (m Model) refreshMessages() Model {
 	var chatBubbles []string
-	for i, msg := range m.messages {
+	for i, msg := range m.Chat.messages {
 		bubble := RenderChatBubble(msg, m)
-		if m.mode == modeVisual {
-			lo, hi := m.visualAnchor, m.visualCursor
+		if m.Modes.mode == modeVisual {
+			lo, hi := m.Modes.visualAnchor, m.Modes.visualCursor
 			if lo > hi {
 				lo, hi = hi, lo
 			}
@@ -33,25 +33,25 @@ func (m Model) refreshMessages() Model {
 		}
 		chatBubbles = append(chatBubbles, bubble)
 	}
-	m.viewPort.SetContent(strings.Join(chatBubbles, "\n\n"))
+	m.Layout.viewPort.SetContent(strings.Join(chatBubbles, "\n\n"))
 	return m
 }
 
 // onServerErr appends a server-error message to the chat.
 func (m Model) onServerErr(msg ServerErrMsg) (Model, tea.Cmd) {
-	m.messages = append(m.messages, ChatMessage{Role: RoleAssistant, Content: "Server error: " + msg.Err.Error()})
+	m.Chat.messages = append(m.Chat.messages, ChatMessage{Role: RoleAssistant, Content: "Server error: " + msg.Err.Error()})
 	return m.refreshMessages(), nil
 }
 
 // onHealthCheck records health status and shows a welcome or error message.
 func (m Model) onHealthCheck(msg HealthCheckMsg) (Model, tea.Cmd) {
-	m.healthChecked = true
+	m.Server.healthChecked = true
 	if msg.Err != nil {
-		m.healthErr = msg.Err
-		m.messages = append(m.messages, ChatMessage{Role: RoleAssistant, Content: "Server error: " + msg.Err.Error()})
+		m.Server.healthErr = msg.Err
+		m.Chat.messages = append(m.Chat.messages, ChatMessage{Role: RoleAssistant, Content: "Server error: " + msg.Err.Error()})
 	} else {
-		m.healthStatus = msg.Status
-		return m.refreshMessages(), tea.Batch(commands.FetchProviders(m.client), commands.FetchPath(m.client))
+		m.Server.healthStatus = msg.Status
+		return m.refreshMessages(), tea.Batch(commands.FetchProviders(m.Server.client), commands.FetchPath(m.Server.client))
 	}
 	return m.refreshMessages(), nil
 }
@@ -59,15 +59,15 @@ func (m Model) onHealthCheck(msg HealthCheckMsg) (Model, tea.Cmd) {
 // onProvidersInfo stores the default model name and model list.
 func (m Model) onProvidersInfo(msg ProvidersInfoMsg) (Model, tea.Cmd) {
 	if msg.Err == nil {
-		m.modelName = msg.ModelName
-		m.models = msg.Models
+		m.Server.modelName = msg.ModelName
+		m.Modes.models = msg.Models
 		for _, model := range msg.Models {
 			if model.ID == msg.ModelName {
-				m.modelID = model.ID
-				m.modelProviderID = model.ProviderID
-				m.modelName = model.Name
-				m.client.ModelID = model.ID
-				m.client.ModelProviderID = model.ProviderID
+				m.Server.modelID = model.ID
+				m.Server.modelProviderID = model.ProviderID
+				m.Server.modelName = model.Name
+				m.Server.client.ModelID = model.ID
+				m.Server.client.ModelProviderID = model.ProviderID
 				break
 			}
 		}
@@ -78,9 +78,9 @@ func (m Model) onProvidersInfo(msg ProvidersInfoMsg) (Model, tea.Cmd) {
 // onPath stores the current working directory path and starts SSE listener.
 func (m Model) onPath(msg PathMsg) (Model, tea.Cmd) {
 	if msg.Err == nil {
-		m.currentPath = msg.Path
-		m.client.Directory = msg.Path
-		return m, commands.StartSSEListener(m.client, program, m)
+		m.Server.currentPath = msg.Path
+		m.Server.client.Directory = msg.Path
+		return m, commands.StartSSEListener(m.Server.client, program, m)
 	}
 	return m, nil
 }
@@ -88,19 +88,19 @@ func (m Model) onPath(msg PathMsg) (Model, tea.Cmd) {
 // onSessionUsage stores token usage info from the current session.
 func (m Model) onSessionUsage(msg SessionUsageMsg) (Model, tea.Cmd) {
 	if msg.Err == nil {
-		m.tokensUsed = msg.TokensUsed
-		m.contextLimit = msg.ContextLimit
+		m.Server.tokensUsed = msg.TokensUsed
+		m.Server.contextLimit = msg.ContextLimit
 	}
 	return m, nil
 }
 
 func (m Model) onPermissionRequest(msg PermissionRequestMsg) (Model, tea.Cmd) {
 	if msg.Err != nil {
-		m.messages = append(m.messages, ChatMessage{Role: RoleAssistant, Content: "Permission error: " + msg.Err.Error()})
+		m.Chat.messages = append(m.Chat.messages, ChatMessage{Role: RoleAssistant, Content: "Permission error: " + msg.Err.Error()})
 		return m.refreshMessages(), nil
 	}
 	if msg.Reply != "" {
-		m.pendingPermission = nil
+		m.Flow.pendingPermission = nil
 		var label string
 		switch msg.Reply {
 		case "once":
@@ -110,79 +110,79 @@ func (m Model) onPermissionRequest(msg PermissionRequestMsg) (Model, tea.Cmd) {
 		case "reject":
 			label = "Permission rejected"
 		}
-		if m.permissionMsgIndex >= 0 && m.permissionMsgIndex < len(m.messages) {
-			m.messages[m.permissionMsgIndex].Content = label
+		if m.Flow.permissionMsgIndex >= 0 && m.Flow.permissionMsgIndex < len(m.Chat.messages) {
+			m.Chat.messages[m.Flow.permissionMsgIndex].Content = label
 		}
-		m.permissionMsgIndex = -1
+		m.Flow.permissionMsgIndex = -1
 		return m.refreshMessages(), nil
 	}
-	m.pendingPermission = msg.Request
-	m.mode = modePerm
-	m.inputText.Blur()
+	m.Flow.pendingPermission = msg.Request
+	m.Modes.mode = modePerm
+	m.Layout.inputText.Blur()
 	patterns := strings.Join(msg.Request.Patterns, ", ")
-	m.permissionMsgIndex = len(m.messages)
-	m.messages = append(m.messages, ChatMessage{Role: RolePermission, Content: "Permission: " + msg.Request.Permission + " on " + patterns + "\n  y=once  a=always  n=reject  esc=cancel"})
+	m.Flow.permissionMsgIndex = len(m.Chat.messages)
+	m.Chat.messages = append(m.Chat.messages, ChatMessage{Role: RolePermission, Content: "Permission: " + msg.Request.Permission + " on " + patterns + "\n  y=once  a=always  n=reject  esc=cancel"})
 	return m.refreshMessages(), nil
 }
 
 // onControlRequest handles incoming questions from the question tool.
 func (m Model) onControlRequest(msg ControlRequestMsg) (Model, tea.Cmd) {
 	if msg.Err != nil {
-		m.loading = false
-		m.awaitingResponse = false
-		m.pendingControl = nil
-		m.currentQuestionIdx = 0
-		m.questionAnswers = nil
-		m.inputText.Placeholder = "Ask anything ..."
-		m.messages = append(m.messages, ChatMessage{Role: RoleAssistant, Content: "Control request error: " + msg.Err.Error()})
+		m.Chat.loading = false
+		m.Flow.awaitingResponse = false
+		m.Flow.pendingControl = nil
+		m.Flow.currentQuestionIdx = 0
+		m.Flow.questionAnswers = nil
+		m.Layout.inputText.Placeholder = "Ask anything ..."
+		m.Chat.messages = append(m.Chat.messages, ChatMessage{Role: RoleAssistant, Content: "Control request error: " + msg.Err.Error()})
 		return m.refreshMessages(), nil
 	}
 	if msg.Request == nil {
-		m.loading = false
-		m.inputText.Placeholder = "Ask anything ..."
-		if m.awaitingResponse {
+		m.Chat.loading = false
+		m.Layout.inputText.Placeholder = "Ask anything ..."
+		if m.Flow.awaitingResponse {
 			return m, nil
 		}
-		m.awaitingResponse = false
-		if m.pendingControl != nil {
+		m.Flow.awaitingResponse = false
+		if m.Flow.pendingControl != nil {
 			m = m.syncLayout()
 			var sb strings.Builder
 			sb.WriteString("Answers:\n")
-			for i, q := range m.pendingControl.Data.Questions {
+			for i, q := range m.Flow.pendingControl.Data.Questions {
 				a := ""
-				if i < len(m.questionAnswers) {
-					a = m.questionAnswers[i]
+				if i < len(m.Flow.questionAnswers) {
+					a = m.Flow.questionAnswers[i]
 				}
 				fmt.Fprintf(&sb, "- %s: %s\n", q.Header, a)
 			}
-			m.pendingControl = nil
-			m.currentQuestionIdx = 0
-			m.questionAnswers = nil
-			m.messages = append(m.messages, ChatMessage{Role: RoleUser, Content: strings.TrimSpace(sb.String())})
+			m.Flow.pendingControl = nil
+			m.Flow.currentQuestionIdx = 0
+			m.Flow.questionAnswers = nil
+			m.Chat.messages = append(m.Chat.messages, ChatMessage{Role: RoleUser, Content: strings.TrimSpace(sb.String())})
 			m = m.refreshMessages()
-			m.inputText.SetValue("")
-			if m.streaming {
+			m.Layout.inputText.SetValue("")
+			if m.Chat.streaming {
 				return m, nil
 			}
-			m.loading = true
-			return m, commands.SendChat(m.client, m.sessionId, strings.TrimSpace(sb.String()))
+			m.Chat.loading = true
+			return m, commands.SendChat(m.Server.client, m.Chat.sessionId, strings.TrimSpace(sb.String()))
 		}
-		if m.streaming {
+		if m.Chat.streaming {
 			return m, nil
 		}
 		return m, nil
 	}
 
-	if m.pendingControl != nil {
+	if m.Flow.pendingControl != nil {
 		return m, nil
 	}
-	m.pendingControl = msg.Request
-	m.currentQuestionIdx = 0
-	m.questionAnswers = nil
-	m.awaitingResponse = true
-	m.loading = false
+	m.Flow.pendingControl = msg.Request
+	m.Flow.currentQuestionIdx = 0
+	m.Flow.questionAnswers = nil
+	m.Flow.awaitingResponse = true
+	m.Chat.loading = false
 
-	m.messages = append(m.messages, ChatMessage{Role: RoleAssistant, Content: msg.Request.Data.Questions[0].Header})
+	m.Chat.messages = append(m.Chat.messages, ChatMessage{Role: RoleAssistant, Content: msg.Request.Data.Questions[0].Header})
 	m = m.refreshMessages()
 	return m.showQusList(), nil
 }
@@ -190,56 +190,56 @@ func (m Model) onControlRequest(msg ControlRequestMsg) (Model, tea.Cmd) {
 // onStreamMsg handles SSE streaming chunks from the AI response.
 func (m Model) onStreamMsg(msg ChatStreamMsg) (Model, tea.Cmd) {
 	if msg.Err != nil {
-		m.loading = false
-		m.streaming = false
-		m.messages = append(m.messages, ChatMessage{Role: RoleAssistant, Content: "Error: " + msg.Err.Error()})
+		m.Chat.loading = false
+		m.Chat.streaming = false
+		m.Chat.messages = append(m.Chat.messages, ChatMessage{Role: RoleAssistant, Content: "Error: " + msg.Err.Error()})
 		return m.refreshMessages(), nil
 	}
 
 	// Session-ID-only message (no text/reasoning/done/err) — response comes via SSE
 	if msg.SessionID != "" && msg.Text == "" && msg.Reasoning == "" && !msg.Done && msg.Err == nil {
-		if m.sessionId == "" {
-			m.sessionId = msg.SessionID
-			if len(m.messages) > 0 {
-				history.AppendMessage(m.sessionId, string(RoleUser), m.messages[len(m.messages)-1].Content)
+		if m.Chat.sessionId == "" {
+			m.Chat.sessionId = msg.SessionID
+			if len(m.Chat.messages) > 0 {
+				history.AppendMessage(m.Chat.sessionId, string(RoleUser), m.Chat.messages[len(m.Chat.messages)-1].Content)
 			}
 		}
 		return m, nil
 	}
 
 	if msg.Done {
-		if !m.streaming {
+		if !m.Chat.streaming {
 			return m, nil
 		}
-		m.streaming = false
+		m.Chat.streaming = false
 		if msg.FullReasoning != "" {
-			for i := len(m.messages) - 1; i >= 0; i-- {
-				if m.messages[i].Role == RoleAssistant {
-					m.messages[i].Reasoning = msg.FullReasoning
+			for i := len(m.Chat.messages) - 1; i >= 0; i-- {
+				if m.Chat.messages[i].Role == RoleAssistant {
+					m.Chat.messages[i].Reasoning = msg.FullReasoning
 					break
 				}
 			}
 		}
 		// Persist final assistant message
-		for i := len(m.messages) - 1; i >= 0; i-- {
-			if m.messages[i].Role == RoleAssistant {
-				history.AppendMessage(m.sessionId, string(RoleAssistant), m.messages[i].Content)
+		for i := len(m.Chat.messages) - 1; i >= 0; i-- {
+			if m.Chat.messages[i].Role == RoleAssistant {
+				history.AppendMessage(m.Chat.sessionId, string(RoleAssistant), m.Chat.messages[i].Content)
 				break
 			}
 		}
-		return m.refreshMessages(), commands.FetchSessionUsage(m.client, m.sessionId)
+		return m.refreshMessages(), commands.FetchSessionUsage(m.Server.client, m.Chat.sessionId)
 	}
 
-	m.loading = false
-	firstStream := !m.streaming
-	m.streaming = true
+	m.Chat.loading = false
+	firstStream := !m.Chat.streaming
+	m.Chat.streaming = true
 
-	lastRole := m.messages[len(m.messages)-1].Role
+	lastRole := m.Chat.messages[len(m.Chat.messages)-1].Role
 
-	if len(m.messages) == 0 || (lastRole != RoleAssistant && lastRole != RoleJudge) {
-		m.messages = append(m.messages, ChatMessage{Role: RoleAssistant})
+	if len(m.Chat.messages) == 0 || (lastRole != RoleAssistant && lastRole != RoleJudge) {
+		m.Chat.messages = append(m.Chat.messages, ChatMessage{Role: RoleAssistant})
 	}
-	last := &m.messages[len(m.messages)-1]
+	last := &m.Chat.messages[len(m.Chat.messages)-1]
 
 	if msg.Text != "" {
 		last.Content += msg.Text
@@ -249,7 +249,7 @@ func (m Model) onStreamMsg(msg ChatStreamMsg) (Model, tea.Cmd) {
 	}
 
 	m = m.refreshMessages()
-	m.viewPort.GotoBottom()
+	m.Layout.viewPort.GotoBottom()
 	if firstStream {
 		return m, nil
 	}
@@ -257,31 +257,38 @@ func (m Model) onStreamMsg(msg ChatStreamMsg) (Model, tea.Cmd) {
 }
 
 func (m Model) onChatResponse(msg ChatResponseMsg) (Model, tea.Cmd) {
-	m.loading = false
+	m.Chat.loading = false
 	if msg.Err != nil {
-		m.messages = append(m.messages, ChatMessage{Role: RoleAssistant, Content: "Error: " + msg.Err.Error()})
+		m.Chat.messages = append(m.Chat.messages, ChatMessage{Role: RoleAssistant, Content: "Error: " + msg.Err.Error()})
 	} else {
 		if msg.SessionID != "" {
-			isNew := m.sessionId == ""
-			m.sessionId = msg.SessionID
+			isNew := m.Chat.sessionId == ""
+			m.Chat.sessionId = msg.SessionID
 			if isNew {
-				history.AppendMessage(msg.SessionID, string(RoleUser), m.messages[len(m.messages)-1].Content)
+				history.AppendMessage(msg.SessionID, string(RoleUser), m.Chat.messages[len(m.Chat.messages)-1].Content)
 			}
 		}
-		m.messages = append(m.messages, ChatMessage{Role: RoleAssistant, Content: msg.Response})
-		if m.sessionId != "" {
-			history.AppendMessage(m.sessionId, string(RoleAssistant), msg.Response)
+		m.Chat.messages = append(m.Chat.messages, ChatMessage{Role: RoleAssistant, Content: msg.Response})
+		if m.Chat.sessionId != "" {
+			history.AppendMessage(m.Chat.sessionId, string(RoleAssistant), msg.Response)
 		}
 	}
 	m = m.refreshMessages()
-	m.viewPort.GotoBottom()
-	return m, commands.FetchSessionUsage(m.client, m.sessionId)
+	m.Layout.viewPort.GotoBottom()
+	return m, commands.FetchSessionUsage(m.Server.client, m.Chat.sessionId)
 }
 
 func (m Model) onMultiAgentPlan(msg MultiAgentPlanMsg) (Model, tea.Cmd) {
-	m.loading = false
+	m.Chat.loading = false
+	m.Chat.agents = msg.Agents
+	m.Chat.complexity = msg.Complexity
+	m.Chat.reason = msg.Reason
+	m.Chat.personalities = msg.Personalities
+	if msg.MultiAgent {
+		m.Chat.multiAgent = &msg.MultiAgent
+	}
 
-	m.messages = append(m.messages, ChatMessage{
+	m.Chat.messages = append(m.Chat.messages, ChatMessage{
 		Role:    MessageRole(msg.Role),
 		Content: msg.Content,
 	})
@@ -290,30 +297,30 @@ func (m Model) onMultiAgentPlan(msg MultiAgentPlanMsg) (Model, tea.Cmd) {
 }
 
 func (m Model) onLoadSession(msg LoadSessionMsg) (Model, tea.Cmd) {
-	m.sessionId = msg.Session.ID
-	m.messages = make([]ChatMessage, len(msg.Session.Messages))
+	m.Chat.sessionId = msg.Session.ID
+	m.Chat.messages = make([]ChatMessage, len(msg.Session.Messages))
 	for i, msg := range msg.Session.Messages {
-		m.messages[i] = ChatMessage{Role: MessageRole(msg.Role), Content: msg.Content}
+		m.Chat.messages[i] = ChatMessage{Role: MessageRole(msg.Role), Content: msg.Content}
 	}
 	m = m.refreshMessages()
-	m.viewPort.GotoBottom()
-	return m, commands.FetchSessionUsage(m.client, m.sessionId)
+	m.Layout.viewPort.GotoBottom()
+	return m, commands.FetchSessionUsage(m.Server.client, m.Chat.sessionId)
 }
 
 const inputBoxHeight = 3
 
 func (m Model) viewportHeight() int {
 	headerHeight := lipgloss.Height(m.renderHeader())
-	available := m.termHeight - headerHeight - inputBoxHeight
+	available := m.Layout.termHeight - headerHeight - inputBoxHeight
 	if available < 1 {
 		available = 1
 	}
-	switch m.mode {
+	switch m.Modes.mode {
 	case modeQus:
-		available -= m.qusHeight
+		available -= m.Modes.qusHeight
 	case modeSession:
 		sessionLines := 2 + 5
-		total := len(m.sessions)
+		total := len(m.Modes.sessions)
 		totalPages := (total + 5 - 1) / 5
 		if totalPages > 1 {
 			sessionLines += 2
@@ -345,23 +352,23 @@ func (m Model) viewportHeight() int {
 }
 
 func (m Model) syncLayout() Model {
-	m.viewPort.SetWidth(m.width)
-	m.viewPort.SetHeight(m.viewportHeight())
-	m.inputText.SetWidth(m.width - 6)
+	m.Layout.viewPort.SetWidth(m.Layout.width)
+	m.Layout.viewPort.SetHeight(m.viewportHeight())
+	m.Layout.inputText.SetWidth(m.Layout.width - 6)
 	return m
 }
 
 // onWindowSize updates layout dimensions when the terminal is resized.
 func (m Model) onWindowSize(msg tea.WindowSizeMsg) (Model, tea.Cmd) {
-	m.width = msg.Width
-	m.termHeight = msg.Height
+	m.Layout.width = msg.Width
+	m.Layout.termHeight = msg.Height
 	m = m.syncLayout()
 	return m, nil
 }
 
 // onKeyPress dispatches key events to the active mode handler.
 func (m Model) onKeyPress(msg tea.KeyPressMsg) (Model, tea.Cmd) {
-	switch m.mode {
+	switch m.Modes.mode {
 	case modeNormal:
 		return m.onNormalKey(msg)
 	case modeInsert:
@@ -388,9 +395,9 @@ func (m Model) rebuildView(msg tea.Msg) (Model, tea.Cmd) {
 	m = m.refreshMessages()
 
 	var cmd tea.Cmd
-	m.inputText, cmd = m.inputText.Update(msg)
+	m.Layout.inputText, cmd = m.Layout.inputText.Update(msg)
 	var vpCmd tea.Cmd
-	m.viewPort, vpCmd = m.viewPort.Update(msg)
+	m.Layout.viewPort, vpCmd = m.Layout.viewPort.Update(msg)
 	return m, tea.Batch(cmd, vpCmd)
 }
 

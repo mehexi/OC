@@ -10,14 +10,14 @@ import (
 )
 
 func renderModelView(m Model) string {
-	if len(m.models) == 0 {
+	if len(m.Modes.models) == 0 {
 		return "Loading models..."
 	}
 	const itemsPerPage = 5
 	models := filteredModelList(m)
 	total := len(models)
 	totalPages := (total + itemsPerPage - 1) / itemsPerPage
-	start := m.modelPage * itemsPerPage
+	start := m.Modes.modelPage * itemsPerPage
 
 	var lines []string
 	lines = append(lines, fmt.Sprintf("%d models", total))
@@ -32,7 +32,7 @@ func renderModelView(m Model) string {
 		item := models[idx]
 		prefix := "  "
 		style := lipgloss.NewStyle()
-		if i == m.modelCursor {
+		if i == m.Modes.modelCursor {
 			prefix = "> "
 			style = lipgloss.NewStyle().Foreground(orangeColor)
 		}
@@ -46,18 +46,18 @@ func renderModelView(m Model) string {
 
 	if totalPages > 1 {
 		lines = append(lines, "")
-		lines = append(lines, fmt.Sprintf("Page %d/%d", m.modelPage+1, totalPages))
+		lines = append(lines, fmt.Sprintf("Page %d/%d", m.Modes.modelPage+1, totalPages))
 	}
 
 	return strings.Join(lines, "\n")
 }
 
 func (m Model) renderHeader() string {
-	switch m.mode {
+	switch m.Modes.mode {
 	case modeQus, modeSession, modeCmd:
 		return compactSplash(m)
 	default:
-		if m.termHeight < 30 {
+		if m.Layout.termHeight < 30 {
 			return compactSplash(m)
 		}
 		return RenderSplash(m)
@@ -70,33 +70,33 @@ func ChatView(m Model) tea.View {
 
 	var body string
 
-	switch m.mode {
+	switch m.Modes.mode {
 	case modeQus:
 		body = lipgloss.JoinVertical(
 			lipgloss.Top,
-			m.viewPort.View(),
+			m.Layout.viewPort.View(),
 			renderQusView(m),
 		)
 	case modeSession:
 		body = lipgloss.JoinVertical(
 			lipgloss.Top,
-			m.viewPort.View(),
+			m.Layout.viewPort.View(),
 			renderSessionView(m),
 		)
 	case modeCmd:
 		body = lipgloss.JoinVertical(
 			lipgloss.Top,
-			m.viewPort.View(),
+			m.Layout.viewPort.View(),
 			renderCmdView(m),
 		)
 	case modeModel:
 		body = lipgloss.JoinVertical(
 			lipgloss.Top,
-			m.viewPort.View(),
+			m.Layout.viewPort.View(),
 			renderModelView(m),
 		)
 	default:
-		body = m.viewPort.View()
+		body = m.Layout.viewPort.View()
 	}
 
 	content := lipgloss.JoinVertical(
@@ -112,20 +112,20 @@ func ChatView(m Model) tea.View {
 }
 
 func renderQusView(m Model) string {
-	if len(m.qusItems) == 0 {
+	if len(m.Modes.qusItems) == 0 {
 		return ""
 	}
-	q := m.pendingControl.Data.Questions[m.currentQuestionIdx]
+	q := m.Flow.pendingControl.Data.Questions[m.Flow.currentQuestionIdx]
 	title := q.Header + "  (" + q.Question + ")"
 
 	var lines []string
 	lines = append(lines, title)
 	lines = append(lines, strings.Repeat("-", len(title)))
 
-	for i, item := range m.qusItems {
+	for i, item := range m.Modes.qusItems {
 		prefix := "  "
 		style := lipgloss.NewStyle()
-		if i == m.qusCursor {
+		if i == m.Modes.qusCursor {
 			prefix = "> "
 			style = lipgloss.NewStyle().Foreground(orangeColor)
 		}
@@ -144,7 +144,7 @@ func renderCmdView(m Model) string {
 	cmds := filteredCmdList(m)
 	total := len(cmds)
 	totalPages := (total + itemsPerPage - 1) / itemsPerPage
-	start := m.cmdPage * itemsPerPage
+	start := m.Modes.cmdPage * itemsPerPage
 
 	var lines []string
 	lines = append(lines, "commands")
@@ -159,7 +159,7 @@ func renderCmdView(m Model) string {
 		item := cmds[idx]
 		prefix := "  "
 		style := lipgloss.NewStyle()
-		if i == m.cmdCursor {
+		if i == m.Modes.cmdCursor {
 			prefix = "> "
 			style = lipgloss.NewStyle().Foreground(orangeColor)
 		}
@@ -169,7 +169,7 @@ func renderCmdView(m Model) string {
 
 	if totalPages > 1 {
 		lines = append(lines, "")
-		lines = append(lines, fmt.Sprintf("Page %d/%d", m.cmdPage+1, totalPages))
+		lines = append(lines, fmt.Sprintf("Page %d/%d", m.Modes.cmdPage+1, totalPages))
 	}
 
 	return strings.Join(lines, "\n")
@@ -177,9 +177,9 @@ func renderCmdView(m Model) string {
 
 func renderSessionView(m Model) string {
 	const itemsPerPage = 5
-	total := len(m.sessions)
+	total := len(m.Modes.sessions)
 	totalPages := (total + itemsPerPage - 1) / itemsPerPage
-	start := m.sessionPage * itemsPerPage
+	start := m.Modes.sessionPage * itemsPerPage
 
 	var lines []string
 	lines = append(lines, fmt.Sprintf("%d sessions", total))
@@ -193,18 +193,18 @@ func renderSessionView(m Model) string {
 		}
 		prefix := "  "
 		style := lipgloss.NewStyle()
-		if i == m.sessionCursor {
+		if i == m.Modes.sessionCursor {
 			prefix = "> "
 			style = lipgloss.NewStyle().Foreground(orangeColor)
 		}
-		title := strings.ReplaceAll(m.sessions[idx].Title, "\n", " ")
+		title := strings.ReplaceAll(m.Modes.sessions[idx].Title, "\n", " ")
 		line := fmt.Sprintf("%s%02d  %-26s", prefix, idx+1, title)
 		lines = append(lines, style.Render(line))
 	}
 
 	if totalPages > 1 {
 		lines = append(lines, "")
-		lines = append(lines, fmt.Sprintf("Page %d/%d", m.sessionPage+1, totalPages))
+		lines = append(lines, fmt.Sprintf("Page %d/%d", m.Modes.sessionPage+1, totalPages))
 	}
 
 	return strings.Join(lines, "\n")
@@ -231,7 +231,7 @@ func RenderChatBubble(msg ChatMessage, m Model) string {
 		return style.Render("──── " + content + " ────")
 	}
 	if msg.Role == RoleJudge {
-		boxWidth := m.width - 6
+		boxWidth := m.Layout.width - 6
 		judgeStyle := lipgloss.NewStyle().
 			Foreground(orangeColor).
 			Bold(true)
@@ -260,7 +260,7 @@ func RenderChatBubble(msg ChatMessage, m Model) string {
 	}
 
 	if meta, isAgent := agentRoles[msg.Role]; isAgent {
-		boxWidth := m.width - 6
+		boxWidth := m.Layout.width - 6
 		headerStyle := lipgloss.NewStyle().
 			Foreground(meta.color).
 			Bold(true)
@@ -275,7 +275,7 @@ func RenderChatBubble(msg ChatMessage, m Model) string {
 	}
 
 	if msg.Reasoning != "" {
-		boxWidth := m.width - 6
+		boxWidth := m.Layout.width - 6
 		reasoningStyle := lipgloss.NewStyle().
 			Foreground(mutedColor).
 			Italic(true)
@@ -295,7 +295,7 @@ func inputModeTag(m Model) string {
 	label := " NORMAL "
 	fg := lipgloss.Color("#888888")
 
-	switch m.mode {
+	switch m.Modes.mode {
 	case modeInsert:
 		label = " INSERT"
 		fg = cyanColor
@@ -326,16 +326,16 @@ func inputModeTag(m Model) string {
 func RenderInputBox(m Model) string {
 
 	mode := inputModeTag(m)
-	input := m.inputText.View()
+	input := m.Layout.inputText.View()
 
-	if m.loading {
+	if m.Chat.loading {
 		input = nextSpinner() + " thinking"
 	}
 
 	content := lipgloss.JoinHorizontal(lipgloss.Center, mode, " ", input)
 
 	return lipgloss.NewStyle().
-		Width(m.width).
+		Width(m.Layout.width).
 		Border(lipgloss.NormalBorder()).
 		BorderLeft(false).BorderRight(false).
 		Padding(0, 1).
