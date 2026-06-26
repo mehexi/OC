@@ -32,16 +32,6 @@ func RenderSplash(m Model) string {
 	var infoLines []string
 	if m.Server.healthStatus != nil && m.Server.healthStatus.Healthy {
 		infoLines = append(infoLines, lipgloss.NewStyle().Foreground(greenColor).Render("● Connected  v"+m.Server.healthStatus.Version))
-		if m.Chat.multiAgent != nil && *m.Chat.multiAgent {
-			label := "⚡ multi-agent"
-			if m.Chat.agents > 0 {
-				label += fmt.Sprintf(" (%d agents)", m.Chat.agents)
-			}
-			infoLines = append(infoLines, lipgloss.NewStyle().Foreground(orangeColor).Render(label))
-			if m.Chat.complexity != "" {
-				infoLines = append(infoLines, lipgloss.NewStyle().Foreground(mutedColor).Render(m.Chat.complexity))
-			}
-		}
 		if m.Server.modelName != "" {
 			infoLines = append(infoLines, lipgloss.NewStyle().Foreground(whiteColor).Render(m.Server.modelName))
 		}

@@ -402,7 +402,6 @@ var cmdList = []cmdItem{
 	{Name: "/sessions", Category: "history", Description: "List and load past sessions"},
 	{Name: "/session new", Category: "history", Description: "Start a fresh session"},
 	{Name: "/clear", Category: "chat", Description: "Clear chat messages"},
-	{Name: "/multiagent", Category: "Agent", Description: "Toggle multi-agent mode — spawns sub-agents that work on tasks in parallel to solve complex problems faster"},
 	{Name: "/model", Category: "model", Description: "Toogle between models"},
 	{Name: "/retry", Category: "chat", Description: "Re-send last user message"},
 	{Name: "/load <n>", Category: "history", Description: "Load session by number"},

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"oc/internal/history"
 	"oc/internal/server"
-	"oc/internal/sysprompt"
 	"oc/internal/tui/commands"
 	"strings"
 
@@ -25,7 +24,7 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 				"  /sessions      List and load past sessions\n" +
 				"  /session new   Start a fresh session\n" +
 				"  /clear         Clear chat messages\n" +
-				"  /multiagent    Toggle multi-agent mode — spawns sub-agents to work on tasks in parallel\n" +
+
 				"  /retry         Re-send last user message\n" +
 				"  /load <n>      Load session by number\n" +
 				"  /tokens        Show token usage\n" +
@@ -64,19 +63,6 @@ func (m Model) handleCommand(input string) (Model, tea.Cmd) {
 		}
 	case "/model":
 		return m.showModelList(), nil
-
-	case "/multiagent":
-		if m.Chat.multiAgent != nil {
-			*m.Chat.multiAgent = !*m.Chat.multiAgent
-		}
-		m.Chat.messages = append(m.Chat.messages, ChatMessage{
-			Role:    RoleSystem,
-			Content: fmt.Sprintf("Multi-agent mode: %v", *m.Chat.multiAgent),
-		})
-		if *m.Chat.multiAgent {
-			return m, commands.SendChat(m.Server.client, m.Chat.sessionId, sysprompt.JudgeSysPrompt())
-		}
-		return m, nil
 	default:
 		return m, commands.AddAssistantMsg("Unknown: " + parts[0] + "\nTry /help for available commands.")
 	}
